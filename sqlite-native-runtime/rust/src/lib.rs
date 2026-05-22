@@ -66,6 +66,12 @@ mod statement;
 mod transaction;
 mod wal;
 
+// Re-exportar tipos opacos de handle: aparecen en las firmas de las funciones
+// pub (snr_open → *mut Handle, snr_prepare → *mut StmtHandle) y los crates
+// externos necesitan poder nombrarlos para integración y tests FFI.
+pub use handle::Handle;
+pub use stmt::StmtHandle;
+
 // Re-exportar símbolos #[no_mangle] — son visibles en la ABI C sin re-export
 // pero los listamos aquí para que el doc sea claro.
 #[allow(unused_imports)]

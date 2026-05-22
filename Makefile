@@ -23,7 +23,7 @@ GLIBC_MIN := 2.17
 .PHONY: all build-rust build-java build test smoke native \
         cross-linux-amd64 cross-linux-arm64 cross \
         install package test-unit coverage \
-        test-rust coverage-rust clean
+        test-rust coverage-rust test-ffi clean
 
 all: build
 
@@ -105,6 +105,13 @@ coverage-rust:
 	  PATH="$(HOME)/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$$PATH" \
 	  RUSTC=$(RUSTC) $(CARGO) llvm-cov --lib --html
 	@echo "Reporte de cobertura Rust: $(RUST_DIR)/target/llvm-cov/html/index.html"
+
+# Ejecuta los FFI contract tests (cargo test --test ffi_contract)
+# Requiere crate-type = ["cdylib", "staticlib", "rlib"] para linkear el test binary
+test-ffi:
+	cd $(RUST_DIR) && \
+	  PATH="$(HOME)/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$$PATH" \
+	  RUSTC=$(RUSTC) $(CARGO) test --test ffi_contract
 
 # Ejecuta los tests unitarios JUnit 5 (requiere la .dylib compilada)
 test-unit: build-rust

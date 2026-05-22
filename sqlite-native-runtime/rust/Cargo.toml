@@ -6,7 +6,7 @@ description = "SQLite C ABI para Java/GraalVM vía Panama FFI"
 
 [lib]
 name       = "sqlite_native_runtime"
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]
 libsqlite3-sys = { version = "0.30", features = ["bundled"] }
