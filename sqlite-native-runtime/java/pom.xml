@@ -11,20 +11,26 @@
   <packaging>jar</packaging>
 
   <name>sqlite-native-runtime</name>
-  <description>Binding Panama FFI para libsqlite_native_runtime — compatible con GraalVM Native Image</description>
+  <description>Binding Panama FFI para libsqlite_native_runtime — compatible con GraalVM 25 Native Image</description>
 
   <properties>
-    <!-- FFM API (java.lang.foreign.*) fue preview en Java 21 y se finalizó en Java 22 (JEP 454). -->
+    <!--
+      Java 22 como target de bytecode, compilado con GraalVM JDK 25.
+      Panama FFM API (java.lang.foreign.*) se estabilizo en Java 22 (JEP 454).
+      Compilar con target 21 es incompatible: en Java 21 la API era PREVIEW y
+      enable-preview solo aplica al release actual del compilador, no a releases
+      anteriores. Java 22 es el minimo compatible sin flags adicionales.
+    -->
     <java.version>22</java.version>
     <maven.compiler.release>${java.version}</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!-- GraalVM Build Tools - native-maven-plugin -->
+    <native.maven.plugin.version>0.10.6</native.maven.plugin.version>
   </properties>
 
-  <!--
-    Sin dependencias externas.
-    La única "dependencia" es libsqlite_native_runtime.{so,dylib,dll}
-    que se carga en tiempo de ejecución vía Panama FFI.
-  -->
+  <!-- Sin dependencias externas en compilacion. La unica dependencia runtime es
+       libsqlite_native_runtime.{so,dylib} cargada via Panama FFI. -->
 
   <build>
     <plugins>
@@ -33,7 +39,9 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
-        <!-- maven.compiler.release en properties aplica -release 21 globalmente -->
+        <!-- Sin compilerArgs adicionales: compilamos con GraalVM JDK 25 donde
+             Panama FFM es estable. enable-preview solo aplica al release actual
+             del JDK y no puede combinarse con un target anterior (release 21). -->
       </plugin>
 
       <plugin>
@@ -51,5 +59,40 @@
 
     </plugins>
   </build>
+
+  <profiles>
+    <!--
+      Perfil native: compila el smoke test como ejecutable nativo con GraalVM 25.
+      Uso: JAVA_HOME=graalvm-25 mvn -Pnative package native:compile
+      Binario resultante: target/snr-smoke
+    -->
+    <profile>
+      <id>native</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.graalvm.buildtools</groupId>
+            <artifactId>native-maven-plugin</artifactId>
+            <version>${native.maven.plugin.version}</version>
+            <extensions>true</extensions>
+            <configuration>
+              <imageName>snr-smoke</imageName>
+              <!-- SmokeTest como punto de entrada para verificar la libreria como native image -->
+              <mainClass>mx.rafex.sqlite.SmokeTest</mainClass>
+              <buildArgs>
+                <!-- SqliteLibrary carga la dylib en bloque estatico: inicializar en runtime -->
+                <buildArg>--initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary</buildArg>
+                <!-- Panama FFM requiere acceso nativo -->
+                <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
+                <!-- Incluir test-classes en el classpath del native build -->
+                <buildArg>-cp</buildArg>
+                <buildArg>${project.build.outputDirectory}:${project.build.testOutputDirectory}</buildArg>
+              </buildArgs>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
 
 </project>

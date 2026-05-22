@@ -1,6 +1,6 @@
 # sqlite-native-runtime
 
-Biblioteca SQLite genérica para Java 22 + GraalVM Native Image.  
+Biblioteca SQLite genérica para Java 22+ y GraalVM 25 Native Image.  
 **Rust** expone la C ABI completa de SQLite vía `libsqlite3-sys`.  
 **Java** la consume con Panama FFI (`java.lang.foreign.*`, JEP 454 — estable desde Java 22) — sin JNI, sin extracción de JARs.
 
@@ -20,7 +20,7 @@ Java (Panama FFI)
 ```
 sqlite-native-runtime/
   rust/          Crate Rust — C ABI (cdylib + staticlib)
-  java/          Biblioteca Java Maven (Java 22, Panama FFI)
+  java/          Biblioteca Java Maven (Java 22, Panama FFI estable — JEP 454)
     src/main/java/mx/rafex/sqlite/
       SqliteLibrary.java    — bindings de bajo nivel (MethodHandle por símbolo snr_*)
       SqliteConnection.java — conexión de alto nivel (AutoCloseable)
@@ -33,7 +33,8 @@ sqlite-native-runtime/
 ### Requisitos
 
 - Rust stable (aarch64-apple-darwin o x86_64-unknown-linux-gnu)
-- Java 22+ (Panama FFM API estable desde JEP 454 — preview en Java 21)
+- GraalVM JDK 25 (incluye `native-image`)
+- Java 22+ (bytecode target 22; Panama FFM es estable en JEP 454 — sin flags preview)
 - Maven 3.9+
 
 ```bash
@@ -120,9 +121,19 @@ try (var q = db.prepare("SELECT * FROM items WHERE name = :n")) {
 
 ## GraalVM Native Image
 
+Flags necesarios al construir la imagen nativa del proyecto consumidor:
+
 ```
 --initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary
 --enable-native-access=ALL-UNNAMED
+```
+
+Para compilar el smoke test como binario nativo (requiere GraalVM 25):
+
+```bash
+make native
+# o con just:
+just native
 ```
 
 ## Funciones C ABI exportadas (`snr_*`)

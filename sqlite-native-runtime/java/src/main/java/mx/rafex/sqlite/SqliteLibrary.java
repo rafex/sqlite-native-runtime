@@ -20,13 +20,16 @@ import java.util.List;
  * por el crate Rust. La carga de la librería ocurre una sola vez al inicializar
  * la clase.
  *
+ * <h2>Requisitos</h2>
+ * <p>Java 22+ (bytecode target 22). Panama FFM API ({@code java.lang.foreign.*}) es
+ * <em>estable</em> desde Java 22 (JEP 454). Compilado con GraalVM JDK 25 — no se requiere
+ * {@code --enable-preview}.</p>
+ *
  * <h2>GraalVM Native Image</h2>
  * <pre>
  *   --initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary
  *   --enable-native-access=ALL-UNNAMED
  * </pre>
- *
- * <p>Requiere Java 22+ (FFM API estable desde JEP 454 — Java 22).</p>
  *
  * <h2>Gestión de memoria</h2>
  * <ul>
