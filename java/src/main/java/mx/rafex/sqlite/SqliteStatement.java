@@ -10,6 +10,20 @@ import java.nio.charset.StandardCharsets;
  * <p>Implementa {@link AutoCloseable} — úsalo en un try-with-resources para
  * garantizar que el statement se finaliza aunque ocurra una excepción.
  *
+ * <h2>Modelo de threading</h2>
+ *
+ * <p>Este objeto <strong>no es thread-safe para secuencias de llamadas</strong>.
+ * Cada llamada individual está serializada internamente por el Mutex del handle Rust
+ * y por {@code SQLITE_OPEN_FULLMUTEX}. Sin embargo, el lock se libera entre llamadas,
+ * por lo que secuencias como {@code columnText()} seguido de {@code columnBytes()} no
+ * son atómicas: un {@code step()} concurrente podría interponerse e invalidar el
+ * puntero interno devuelto por {@code columnText()}.
+ *
+ * <p><strong>Regla:</strong> usa una instancia de {@code SqliteStatement} desde un
+ * único hilo a la vez, o sincroniza externamente las secuencias de llamadas.
+ * Con Project Loom, asegúrate de que ningún virtual thread distinto opere sobre
+ * el mismo statement de forma concurrente.
+ *
  * <h2>Uso típico</h2>
  * <pre>{@code
  * try (var stmt = conn.prepare("SELECT id, name FROM users WHERE active = ?")) {
@@ -46,10 +60,17 @@ public final class SqliteStatement implements AutoCloseable {
     public static final int TYPE_NULL    = 5;
 
     private final MemorySegment stmt;
+    private final Runnable onClose;
     private boolean closed = false;
 
     SqliteStatement(MemorySegment stmt) {
         this.stmt = stmt;
+        this.onClose = null;
+    }
+
+    SqliteStatement(MemorySegment stmt, Runnable onClose) {
+        this.stmt = stmt;
+        this.onClose = onClose;
     }
 
     // ── Bind (índice 1-based) ─────────────────────────────────────────────────
@@ -113,10 +134,11 @@ public final class SqliteStatement implements AutoCloseable {
     /**
      * Devuelve el índice (1-based) del parámetro con nombre {@code name}
      * (p.ej. {@code ":id"}, {@code "@nombre"}).
-     * Devuelve 0 si no existe.
+     * Devuelve 0 si no existe. Lanza excepción si {@code name} es null.
      */
     public int parameterIndex(String name) {
         checkOpen();
+        if (name == null) throw new SqliteException("parameterIndex: name no puede ser null");
         return SqliteLibrary.snr_bind_parameter_index(stmt, name);
     }
 
@@ -204,11 +226,13 @@ public final class SqliteStatement implements AutoCloseable {
      * Lee la columna {@code col} (0-based) como {@code String} UTF-8.
      * Devuelve {@code null} si la columna es NULL.
      *
-     * <p>Lee desde el puntero interno de SQLite (sin asignación extra en heap Rust).
-     * El puntero es válido hasta el siguiente {@link #step()}, {@link #reset()} o {@link #close()}.
+     * <p><strong>Advertencia de threading:</strong> el puntero interno devuelto por
+     * SQLite es válido solo hasta el siguiente {@link #step()}, {@link #reset()} o
+     * {@link #close()}. No usar este método en secuencias concurrentes sobre el mismo
+     * statement — ver la sección "Modelo de threading" en el Javadoc de la clase.
      *
      * <p>El segmento se acota al tamaño exacto reportado por {@code snr_column_bytes}
-     * para que Panama FFI detecte accesos fuera de bounds (TASK-0002/M-2).
+     * para que Panama FFI detecte accesos fuera de bounds.
      */
     public String columnText(int col) {
         checkOpen();
@@ -221,9 +245,8 @@ public final class SqliteStatement implements AutoCloseable {
 
     /**
      * Lee la columna {@code col} (0-based) como {@code String} usando una copia en heap Rust.
-     * Usa esto si necesitas guardar el valor más allá del siguiente step/reset.
-     * Equivalente a {@link #columnText(int)} en la práctica (Java copia el string de todos modos),
-     * pero útil si quieres asegurarte de no depender del ciclo de vida interno de SQLite.
+     * El valor es independiente del ciclo de vida del statement — seguro más allá del siguiente step.
+     * Preferir {@link #columnText(int)} para columnas que se consumen inmediatamente.
      */
     public String columnTextSafe(int col) {
         checkOpen();
@@ -274,6 +297,7 @@ public final class SqliteStatement implements AutoCloseable {
         if (!closed) {
             closed = true;
             SqliteLibrary.snr_stmt_close(stmt);
+            if (onClose != null) onClose.run();
         }
     }
 
@@ -285,7 +309,7 @@ public final class SqliteStatement implements AutoCloseable {
 
     /**
      * Lee el último error del hilo como String.
-     * Usa snr_last_error_copy para evitar carreras con Project Loom (TASK-0001/M-1):
+     * Usa snr_last_error_copy para ser seguro con Project Loom (M-1):
      * la copia se toma atómicamente y se libera tras la lectura.
      */
     static String lastError() {
@@ -294,8 +318,8 @@ public final class SqliteStatement implements AutoCloseable {
 
     /**
      * Lee un string null-terminado desde un puntero interno de SQLite o Rust.
-     * No libera el puntero — llamar solo con punteros cuyo ciclo de vida
-     * está gestionado por SQLite o por el thread-local de Rust.
+     * No libera el puntero — solo para punteros cuyo ciclo de vida gestiona SQLite
+     * o el thread-local de Rust.
      * Devuelve null si el puntero es NULL.
      *
      * <p>Panama FFI devuelve segmentos con byteSize=0 para punteros C; se requiere

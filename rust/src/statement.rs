@@ -1,4 +1,4 @@
-use std::ffi::{CStr, CString};
+use std::ffi::CStr;
 use std::os::raw::c_char;
 
 use libsqlite3_sys as ffi;
@@ -140,9 +140,10 @@ pub unsafe extern "C" fn snr_stmt_clear_bindings(stmt: *mut StmtHandle) -> i32 {
 /// `stmt` debe ser un puntero válido.
 #[no_mangle]
 pub unsafe extern "C" fn snr_bind_null(stmt: *mut StmtHandle, idx: i32) -> i32 {
+    clear_last_error();
     let sh = match stmt_ref(stmt) {
         Some(s) => s,
-        None => return -1,
+        None => { set_last_error("snr_bind_null: stmt nulo"); return -1; }
     };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
@@ -158,9 +159,10 @@ pub unsafe extern "C" fn snr_bind_null(stmt: *mut StmtHandle, idx: i32) -> i32 {
 /// `stmt` debe ser un puntero válido.
 #[no_mangle]
 pub unsafe extern "C" fn snr_bind_int(stmt: *mut StmtHandle, idx: i32, val: i64) -> i32 {
+    clear_last_error();
     let sh = match stmt_ref(stmt) {
         Some(s) => s,
-        None => return -1,
+        None => { set_last_error("snr_bind_int: stmt nulo"); return -1; }
     };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
@@ -176,9 +178,10 @@ pub unsafe extern "C" fn snr_bind_int(stmt: *mut StmtHandle, idx: i32, val: i64)
 /// `stmt` debe ser un puntero válido.
 #[no_mangle]
 pub unsafe extern "C" fn snr_bind_double(stmt: *mut StmtHandle, idx: i32, val: f64) -> i32 {
+    clear_last_error();
     let sh = match stmt_ref(stmt) {
         Some(s) => s,
-        None => return -1,
+        None => { set_last_error("snr_bind_double: stmt nulo"); return -1; }
     };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
@@ -190,18 +193,20 @@ pub unsafe extern "C" fn snr_bind_double(stmt: *mut StmtHandle, idx: i32, val: f
 
 /// Enlaza una cadena UTF-8 al parámetro `idx` (1-based).
 /// SQLite copia el texto internamente; `val` puede liberarse después.
+/// Si `val` es NULL, enlaza NULL.
 ///
 /// # Safety
 /// `stmt` y `val` deben ser punteros válidos.
 #[no_mangle]
 pub unsafe extern "C" fn snr_bind_text(stmt: *mut StmtHandle, idx: i32, val: *const c_char) -> i32 {
-    let sh = match stmt_ref(stmt) {
-        Some(s) => s,
-        None => return -1,
-    };
+    clear_last_error();
     if val.is_null() {
         return snr_bind_null(stmt, idx);
     }
+    let sh = match stmt_ref(stmt) {
+        Some(s) => s,
+        None => { set_last_error("snr_bind_text: stmt nulo"); return -1; }
+    };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
         Err(_) => { set_last_error("snr_bind_text: mutex envenenado"); return -1; }
@@ -212,6 +217,7 @@ pub unsafe extern "C" fn snr_bind_text(stmt: *mut StmtHandle, idx: i32, val: *co
 
 /// Enlaza un blob al parámetro `idx` (1-based).
 /// SQLite copia los bytes internamente.
+/// Si `data` es NULL, enlaza NULL.
 ///
 /// # Safety
 /// `stmt` y `data` deben ser punteros válidos; `len` debe ser el tamaño real de `data`.
@@ -222,10 +228,7 @@ pub unsafe extern "C" fn snr_bind_blob(
     data: *const u8,
     len: i32,
 ) -> i32 {
-    let sh = match stmt_ref(stmt) {
-        Some(s) => s,
-        None => return -1,
-    };
+    clear_last_error();
     if data.is_null() {
         return snr_bind_null(stmt, idx);
     }
@@ -235,6 +238,10 @@ pub unsafe extern "C" fn snr_bind_blob(
         set_last_error("snr_bind_blob: len negativo no permitido");
         return -1;
     }
+    let sh = match stmt_ref(stmt) {
+        Some(s) => s,
+        None => { set_last_error("snr_bind_blob: stmt nulo"); return -1; }
+    };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
         Err(_) => { set_last_error("snr_bind_blob: mutex envenenado"); return -1; }
@@ -245,23 +252,25 @@ pub unsafe extern "C" fn snr_bind_blob(
     if rc == ffi::SQLITE_OK { 0 } else { set_error_from_stmt(sh); -1 }
 }
 
-/// Devuelve el índice (1-based) del parámetro con nombre `name` (p.ej. ":nombre", "@nombre", "?NNN").
-/// Devuelve 0 si no existe.
+/// Devuelve el índice (1-based) del parámetro con nombre `name`.
+/// Devuelve 0 si no existe. Devuelve 0 y establece error si `name` es NULL.
 ///
 /// # Safety
 /// `stmt` y `name` deben ser punteros válidos.
 #[no_mangle]
 pub unsafe extern "C" fn snr_bind_parameter_index(stmt: *mut StmtHandle, name: *const c_char) -> i32 {
-    let sh = match stmt_ref(stmt) {
-        Some(s) => s,
-        None => return 0,
-    };
+    clear_last_error();
     if name.is_null() {
+        set_last_error("snr_bind_parameter_index: name nulo");
         return 0;
     }
+    let sh = match stmt_ref(stmt) {
+        Some(s) => s,
+        None => { set_last_error("snr_bind_parameter_index: stmt nulo"); return 0; }
+    };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
-        Err(_) => return 0,
+        Err(_) => { set_last_error("snr_bind_parameter_index: mutex envenenado"); return 0; }
     };
     ffi::sqlite3_bind_parameter_index(sh.stmt, name)
 }
@@ -303,13 +312,14 @@ pub unsafe extern "C" fn snr_step(stmt: *mut StmtHandle) -> i32 {
 /// `stmt` debe ser un puntero válido y haber retornado SNR_ROW en el último step.
 #[no_mangle]
 pub unsafe extern "C" fn snr_column_count(stmt: *mut StmtHandle) -> i32 {
+    clear_last_error();
     let sh = match stmt_ref(stmt) {
         Some(s) => s,
-        None => return 0,
+        None => { set_last_error("snr_column_count: stmt nulo"); return 0; }
     };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
-        Err(_) => return 0,
+        Err(_) => { set_last_error("snr_column_count: mutex envenenado"); return 0; }
     };
     ffi::sqlite3_column_count(sh.stmt)
 }
@@ -320,13 +330,14 @@ pub unsafe extern "C" fn snr_column_count(stmt: *mut StmtHandle) -> i32 {
 /// `stmt` debe ser válido y haber retornado SNR_ROW.
 #[no_mangle]
 pub unsafe extern "C" fn snr_column_type(stmt: *mut StmtHandle, col: i32) -> i32 {
+    clear_last_error();
     let sh = match stmt_ref(stmt) {
         Some(s) => s,
-        None => return SNR_TYPE_NULL,
+        None => { set_last_error("snr_column_type: stmt nulo"); return SNR_TYPE_NULL; }
     };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
-        Err(_) => return SNR_TYPE_NULL,
+        Err(_) => { set_last_error("snr_column_type: mutex envenenado"); return SNR_TYPE_NULL; }
     };
     ffi::sqlite3_column_type(sh.stmt, col)
 }
@@ -337,13 +348,14 @@ pub unsafe extern "C" fn snr_column_type(stmt: *mut StmtHandle, col: i32) -> i32
 /// `stmt` debe ser válido y haber retornado SNR_ROW.
 #[no_mangle]
 pub unsafe extern "C" fn snr_column_int(stmt: *mut StmtHandle, col: i32) -> i64 {
+    clear_last_error();
     let sh = match stmt_ref(stmt) {
         Some(s) => s,
-        None => return 0,
+        None => { set_last_error("snr_column_int: stmt nulo"); return 0; }
     };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
-        Err(_) => return 0,
+        Err(_) => { set_last_error("snr_column_int: mutex envenenado"); return 0; }
     };
     ffi::sqlite3_column_int64(sh.stmt, col)
 }
@@ -354,13 +366,14 @@ pub unsafe extern "C" fn snr_column_int(stmt: *mut StmtHandle, col: i32) -> i64 
 /// `stmt` debe ser válido y haber retornado SNR_ROW.
 #[no_mangle]
 pub unsafe extern "C" fn snr_column_double(stmt: *mut StmtHandle, col: i32) -> f64 {
+    clear_last_error();
     let sh = match stmt_ref(stmt) {
         Some(s) => s,
-        None => return 0.0,
+        None => { set_last_error("snr_column_double: stmt nulo"); return 0.0; }
     };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
-        Err(_) => return 0.0,
+        Err(_) => { set_last_error("snr_column_double: mutex envenenado"); return 0.0; }
     };
     ffi::sqlite3_column_double(sh.stmt, col)
 }
@@ -377,13 +390,14 @@ pub unsafe extern "C" fn snr_column_double(stmt: *mut StmtHandle, col: i32) -> f
 /// `stmt` debe ser válido y haber retornado SNR_ROW.
 #[no_mangle]
 pub unsafe extern "C" fn snr_column_text(stmt: *mut StmtHandle, col: i32) -> *const c_char {
+    clear_last_error();
     let sh = match stmt_ref(stmt) {
         Some(s) => s,
-        None => return std::ptr::null(),
+        None => { set_last_error("snr_column_text: stmt nulo"); return std::ptr::null(); }
     };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
-        Err(_) => return std::ptr::null(),
+        Err(_) => { set_last_error("snr_column_text: mutex envenenado"); return std::ptr::null(); }
     };
     let ptr = ffi::sqlite3_column_text(sh.stmt, col);
     ptr as *const c_char
@@ -397,25 +411,23 @@ pub unsafe extern "C" fn snr_column_text(stmt: *mut StmtHandle, col: i32) -> *co
 /// `stmt` debe ser válido y haber retornado SNR_ROW.
 #[no_mangle]
 pub unsafe extern "C" fn snr_column_text_owned(stmt: *mut StmtHandle, col: i32) -> *mut c_char {
+    clear_last_error();
     let sh = match stmt_ref(stmt) {
         Some(s) => s,
-        None => return std::ptr::null_mut(),
+        None => { set_last_error("snr_column_text_owned: stmt nulo"); return std::ptr::null_mut(); }
     };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
-        Err(_) => return std::ptr::null_mut(),
+        Err(_) => { set_last_error("snr_column_text_owned: mutex envenenado"); return std::ptr::null_mut(); }
     };
     let ptr = ffi::sqlite3_column_text(sh.stmt, col);
     if ptr.is_null() {
         return std::ptr::null_mut();
     }
-    let s = CStr::from_ptr(ptr as *const c_char)
-        .to_string_lossy()
-        .into_owned();
-    match CString::new(s) {
-        Ok(cs) => cs.into_raw(),
-        Err(_) => std::ptr::null_mut(),
-    }
+    // Clonar directamente desde CStr: una sola allocación, sin String intermedio.
+    // SAFETY: ptr apunta a texto UTF-8 nul-terminado gestionado por SQLite.
+    let owned = CStr::from_ptr(ptr as *const c_char).to_owned();
+    owned.into_raw()
 }
 
 /// Lee la columna `col` como blob. Devuelve puntero INTERNO de SQLite.
@@ -426,13 +438,14 @@ pub unsafe extern "C" fn snr_column_text_owned(stmt: *mut StmtHandle, col: i32) 
 /// `stmt` debe ser válido y haber retornado SNR_ROW.
 #[no_mangle]
 pub unsafe extern "C" fn snr_column_blob(stmt: *mut StmtHandle, col: i32) -> *const u8 {
+    clear_last_error();
     let sh = match stmt_ref(stmt) {
         Some(s) => s,
-        None => return std::ptr::null(),
+        None => { set_last_error("snr_column_blob: stmt nulo"); return std::ptr::null(); }
     };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
-        Err(_) => return std::ptr::null(),
+        Err(_) => { set_last_error("snr_column_blob: mutex envenenado"); return std::ptr::null(); }
     };
     ffi::sqlite3_column_blob(sh.stmt, col) as *const u8
 }
@@ -443,13 +456,14 @@ pub unsafe extern "C" fn snr_column_blob(stmt: *mut StmtHandle, col: i32) -> *co
 /// `stmt` debe ser válido y haber retornado SNR_ROW.
 #[no_mangle]
 pub unsafe extern "C" fn snr_column_bytes(stmt: *mut StmtHandle, col: i32) -> i32 {
+    clear_last_error();
     let sh = match stmt_ref(stmt) {
         Some(s) => s,
-        None => return 0,
+        None => { set_last_error("snr_column_bytes: stmt nulo"); return 0; }
     };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
-        Err(_) => return 0,
+        Err(_) => { set_last_error("snr_column_bytes: mutex envenenado"); return 0; }
     };
     ffi::sqlite3_column_bytes(sh.stmt, col)
 }
@@ -461,13 +475,14 @@ pub unsafe extern "C" fn snr_column_bytes(stmt: *mut StmtHandle, col: i32) -> i3
 /// `stmt` debe ser válido.
 #[no_mangle]
 pub unsafe extern "C" fn snr_column_name(stmt: *mut StmtHandle, col: i32) -> *const c_char {
+    clear_last_error();
     let sh = match stmt_ref(stmt) {
         Some(s) => s,
-        None => return std::ptr::null(),
+        None => { set_last_error("snr_column_name: stmt nulo"); return std::ptr::null(); }
     };
     let _guard = match sh.conn.lock() {
         Ok(g) => g,
-        Err(_) => return std::ptr::null(),
+        Err(_) => { set_last_error("snr_column_name: mutex envenenado"); return std::ptr::null(); }
     };
     ffi::sqlite3_column_name(sh.stmt, col)
 }

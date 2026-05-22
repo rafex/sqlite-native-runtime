@@ -20,16 +20,23 @@ pub const SNR_CHECKPOINT_TRUNCATE: i32 = ffi::SQLITE_CHECKPOINT_TRUNCATE as i32;
 /// `db_name` puede ser NULL o "" para la base de datos principal ("main").
 /// `mode` debe ser uno de SNR_CHECKPOINT_PASSIVE/FULL/RESTART/TRUNCATE.
 ///
+/// `out_wal_frames` y `out_checkpointed` son punteros de salida opcionales (pueden ser NULL).
+/// Si no son NULL recibirán, respectivamente:
+///   - el número total de frames en el WAL,
+///   - el número de frames efectivamente checkpointed.
+///
 /// Devuelve 0 en éxito, -1 en error.
-/// Después del checkpoint, snr_wal_checkpoint_result permite leer frames/wal_frames.
 ///
 /// # Safety
 /// `handle` debe ser un puntero válido.
+/// `out_wal_frames` y `out_checkpointed` deben ser NULL o punteros a `i32` válidos.
 #[no_mangle]
 pub unsafe extern "C" fn snr_wal_checkpoint(
     handle: *mut Handle,
     db_name: *const c_char,
     mode: i32,
+    out_wal_frames: *mut i32,
+    out_checkpointed: *mut i32,
 ) -> i32 {
     clear_last_error();
     let h = match handle_ref(handle) {
@@ -59,6 +66,13 @@ pub unsafe extern "C" fn snr_wal_checkpoint(
     if rc != ffi::SQLITE_OK {
         set_last_error(format!("snr_wal_checkpoint: rc={rc} n_log={n_log} n_ckpt={n_ckpt}"));
         return -1;
+    }
+
+    if !out_wal_frames.is_null() {
+        *out_wal_frames = n_log;
+    }
+    if !out_checkpointed.is_null() {
+        *out_checkpointed = n_ckpt;
     }
     0
 }

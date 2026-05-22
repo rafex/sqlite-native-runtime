@@ -33,6 +33,7 @@ import java.util.List;
  *   <li>Funciones que devuelven {@code MemorySegment} (char*) transfieren propiedad —
  *       llamar {@link #snr_free_string} cuando termines.</li>
  *   <li>{@link #snr_last_error()} devuelve puntero interno — NO liberar.</li>
+ *   <li>{@link #snr_last_error_copy()} devuelve copia — SÍ liberar con {@link #snr_free_string}.</li>
  *   <li>{@link #snr_column_text(MemorySegment, int)} devuelve puntero interno
  *       válido hasta el siguiente step/reset/close — leer inmediatamente.</li>
  *   <li>{@link #snr_column_text_owned(MemorySegment, int)} devuelve copia — SÍ liberar.</li>
@@ -48,6 +49,20 @@ public final class SqliteLibrary {
     static final ValueLayout.OfInt    C_INT    = ValueLayout.JAVA_INT;
     static final ValueLayout.OfDouble C_DOUBLE = ValueLayout.JAVA_DOUBLE;
     static final AddressLayout        C_PTR    = ValueLayout.ADDRESS;
+
+    // ── Constantes de apertura (R-6) ─────────────────────────────────────────
+    // Valores definidos en la especificación SQLite — estables desde SQLite 3.x.
+    // Usar estas constantes en lugar de llamar snr_flag_*() para evitar el overhead
+    // de un downcall FFI por una constante conocida en tiempo de compilación.
+
+    /** Abrir en modo solo-lectura. */
+    public static final int OPEN_READONLY  = 0x00000001;
+    /** Abrir en modo lectura-escritura (sin crear si no existe). */
+    public static final int OPEN_READWRITE = 0x00000002;
+    /** Crear la base de datos si no existe (combinar con {@link #OPEN_READWRITE}). */
+    public static final int OPEN_CREATE    = 0x00000004;
+    /** Rechazar symlinks al abrir (seguridad). */
+    public static final int OPEN_NOFOLLOW  = 0x01000000;
 
     private static final SymbolLookup LIB;
     private static final Linker LINKER = Linker.nativeLinker();
@@ -114,9 +129,11 @@ public final class SqliteLibrary {
     private static final MethodHandle MH_RELEASE      = find("snr_release",      FunctionDescriptor.of(C_INT, C_PTR, C_PTR));
     private static final MethodHandle MH_ROLLBACK_TO  = find("snr_rollback_to",  FunctionDescriptor.of(C_INT, C_PTR, C_PTR));
 
-    // WAL
-    private static final MethodHandle MH_WAL_CHECKPOINT      = find("snr_wal_checkpoint",      FunctionDescriptor.of(C_INT, C_PTR, C_PTR, C_INT));
-    private static final MethodHandle MH_WAL_AUTOCHECKPOINT   = find("snr_wal_autocheckpoint",   FunctionDescriptor.of(C_INT, C_PTR, C_INT));
+    // WAL — snr_wal_checkpoint recibe dos punteros de salida opcionales (R-4)
+    private static final MethodHandle MH_WAL_CHECKPOINT    = find("snr_wal_checkpoint",
+            FunctionDescriptor.of(C_INT, C_PTR, C_PTR, C_INT, C_PTR, C_PTR));
+    private static final MethodHandle MH_WAL_AUTOCHECKPOINT = find("snr_wal_autocheckpoint",
+            FunctionDescriptor.of(C_INT, C_PTR, C_INT));
 
     // ── API pública ───────────────────────────────────────────────────────────
 
@@ -158,8 +175,9 @@ public final class SqliteLibrary {
      * Abre la base de datos en {@code path}.
      *
      * @param path  ruta absoluta al archivo .db
-     * @param flags combinación de {@code snr_flag_readonly()}, {@code snr_flag_readwrite()},
-     *              {@code snr_flag_create()}, o 0 para read-write + create (por defecto)
+     * @param flags combinación de {@link #OPEN_READONLY}, {@link #OPEN_READWRITE},
+     *              {@link #OPEN_CREATE}, {@link #OPEN_NOFOLLOW},
+     *              o 0 para read-write + create + nofollow (por defecto)
      * @return handle opaco o NULL en error
      */
     public static MemorySegment snr_open(String path, int flags) {
@@ -267,7 +285,7 @@ public final class SqliteLibrary {
         catch (Throwable t) { throw new SqliteException("snr_bind_double falló", t); }
     }
 
-    /** Enlaza un String UTF-8 al parámetro {@code idx} (1-based). */
+    /** Enlaza un String UTF-8 al parámetro {@code idx} (1-based). Si {@code val} es null, enlaza NULL. */
     public static int snr_bind_text(MemorySegment stmt, int idx, String val) {
         try (var arena = Arena.ofConfined()) {
             var ptr = val != null ? arena.allocateFrom(val) : MemorySegment.NULL;
@@ -301,8 +319,7 @@ public final class SqliteLibrary {
     }
 
     /**
-     * Devuelve el índice (1-based) del parámetro con nombre {@code name}
-     * (p.ej. {@code ":nombre"}, {@code "@nombre"}).
+     * Devuelve el índice (1-based) del parámetro con nombre {@code name}.
      * Devuelve 0 si no existe.
      */
     public static int snr_bind_parameter_index(MemorySegment stmt, String name) {
@@ -360,7 +377,6 @@ public final class SqliteLibrary {
     /**
      * Lee la columna {@code col} como texto y devuelve una copia en heap.
      * Java DEBE liberar el resultado con {@link #snr_free_string}.
-     * Más seguro para retener el valor más allá del siguiente step.
      */
     public static MemorySegment snr_column_text_owned(MemorySegment stmt, int col) {
         try { return (MemorySegment) MH_COL_TEXT_OWNED.invokeExact(stmt, col); }
@@ -370,7 +386,6 @@ public final class SqliteLibrary {
     /**
      * Puntero INTERNO al blob de la columna {@code col} (0-based).
      * Válido hasta el siguiente step/reset/close.
-     * Usar junto con {@link #snr_column_bytes} para conocer la longitud.
      */
     public static MemorySegment snr_column_blob(MemorySegment stmt, int col) {
         try { return (MemorySegment) MH_COL_BLOB.invokeExact(stmt, col); }
@@ -386,7 +401,6 @@ public final class SqliteLibrary {
     /**
      * Nombre de la columna {@code col} (0-based).
      * Devuelve puntero interno — NO liberar, válido mientras el statement esté abierto.
-     * Usar {@link SqliteStatement#columnName(int)} para obtener un String Java.
      */
     public static MemorySegment snr_column_name(MemorySegment stmt, int col) {
         try { return (MemorySegment) MH_COL_NAME.invokeExact(stmt, col); }
@@ -449,17 +463,25 @@ public final class SqliteLibrary {
     // ── WAL ──────────────────────────────────────────────────────────────────
 
     /**
-     * Ejecuta un WAL checkpoint.
+     * Ejecuta un WAL checkpoint con punteros de salida para observabilidad (R-4).
      *
-     * @param handle  handle de la conexión
-     * @param dbName  nombre de la BD ("main", "temp", etc.), o {@code null} para "main"
-     * @param mode    {@code WalMode.PASSIVE}, {@code FULL}, {@code RESTART} o {@code TRUNCATE}
+     * @param handle          handle de la conexión
+     * @param dbName          nombre de la BD, o {@code null} para "main"
+     * @param mode            modo del checkpoint (usar constantes {@code SNR_CHECKPOINT_*} o
+     *                        los valores del enum {@link SqliteConnection.WalMode})
+     * @param outWalFrames    segmento de 4 bytes que recibirá el total de frames en el WAL,
+     *                        o {@link MemorySegment#NULL} si no se necesita
+     * @param outCheckpointed segmento de 4 bytes que recibirá los frames checkpointed,
+     *                        o {@link MemorySegment#NULL} si no se necesita
      * @return 0 en éxito, -1 en error
      */
-    public static int snr_wal_checkpoint(MemorySegment handle, String dbName, int mode) {
+    public static int snr_wal_checkpoint(MemorySegment handle, String dbName, int mode,
+            MemorySegment outWalFrames, MemorySegment outCheckpointed) {
         try (var arena = Arena.ofConfined()) {
             var ptr = dbName != null ? arena.allocateFrom(dbName) : MemorySegment.NULL;
-            return (int) MH_WAL_CHECKPOINT.invokeExact(handle, ptr, mode);
+            var wf  = outWalFrames    != null ? outWalFrames    : MemorySegment.NULL;
+            var ck  = outCheckpointed != null ? outCheckpointed : MemorySegment.NULL;
+            return (int) MH_WAL_CHECKPOINT.invokeExact(handle, ptr, mode, wf, ck);
         } catch (Throwable t) { throw new SqliteException("snr_wal_checkpoint falló", t); }
     }
 

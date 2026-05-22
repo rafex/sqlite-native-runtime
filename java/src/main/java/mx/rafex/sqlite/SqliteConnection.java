@@ -1,6 +1,9 @@
 package mx.rafex.sqlite;
 
+import java.lang.foreign.Arena;
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.logging.Logger;
 
 /**
@@ -34,20 +37,16 @@ import java.util.logging.Logger;
  *
  * <h2>Savepoints</h2>
  * <pre>{@code
- * db.savepoint("sp1");
- * try {
- *     // operaciones...
- *     db.release("sp1");
- * } catch (Exception e) {
- *     db.rollbackTo("sp1");
- *     db.release("sp1");
- * }
+ * db.withSavepoint("sp1", () -> {
+ *     // operaciones que hacen rollback automático si lanzan excepción
+ * });
  * }</pre>
  *
  * <h2>WAL</h2>
  * <pre>{@code
- * db.enableWal();               // journal_mode=WAL + synchronous=NORMAL
- * db.walCheckpoint(WalMode.TRUNCATE, null);
+ * db.enableWal();
+ * WalCheckpointResult r = db.walCheckpoint(WalMode.TRUNCATE, null);
+ * System.out.printf("WAL frames: %d, checkpointed: %d%n", r.walFrames(), r.checkpointed());
  * }</pre>
  */
 public final class SqliteConnection implements AutoCloseable {
@@ -59,9 +58,18 @@ public final class SqliteConnection implements AutoCloseable {
         WalMode(int v) { this.value = v; }
     }
 
+    /**
+     * Resultado de un WAL checkpoint (R-4).
+     *
+     * @param walFrames    número total de frames en el WAL antes del checkpoint
+     * @param checkpointed número de frames efectivamente copiados al fichero principal
+     */
+    public record WalCheckpointResult(int walFrames, int checkpointed) {}
+
     private static final Logger LOG = Logger.getLogger(SqliteConnection.class.getName());
 
     private final MemorySegment handle;
+    private final AtomicInteger openStatements = new AtomicInteger(0);
     private boolean closed = false;
 
     private SqliteConnection(MemorySegment handle) {
@@ -72,6 +80,7 @@ public final class SqliteConnection implements AutoCloseable {
 
     /**
      * Abre (o crea) la base de datos en {@code path}.
+     * Por defecto aplica {@link SqliteLibrary#OPEN_NOFOLLOW} para rechazar symlinks.
      *
      * @throws SqliteException si no se puede abrir
      */
@@ -86,7 +95,8 @@ public final class SqliteConnection implements AutoCloseable {
 
     /**
      * Abre (o crea) la base de datos en {@code path} con flags explícitos.
-     * Usa las constantes {@code SqliteLibrary.snr_flag_*()} para los flags.
+     * Usar las constantes {@link SqliteLibrary#OPEN_READONLY}, {@link SqliteLibrary#OPEN_READWRITE},
+     * {@link SqliteLibrary#OPEN_CREATE}, {@link SqliteLibrary#OPEN_NOFOLLOW}.
      */
     public static SqliteConnection open(String path, int flags) {
         var h = SqliteLibrary.snr_open(path, flags);
@@ -138,6 +148,8 @@ public final class SqliteConnection implements AutoCloseable {
     /**
      * Compila SQL en un prepared statement.
      * El statement DEBE cerrarse — úsalo en try-with-resources.
+     * Al cerrar el statement se decrementará automáticamente el contador de statements
+     * abiertos de esta conexión.
      *
      * @throws SqliteException si el SQL no es válido
      */
@@ -147,7 +159,8 @@ public final class SqliteConnection implements AutoCloseable {
         if (isNull(stmtHandle)) {
             throw new SqliteException("prepare() falló [%s]: %s".formatted(sql, lastError()));
         }
-        return new SqliteStatement(stmtHandle);
+        openStatements.incrementAndGet();
+        return new SqliteStatement(stmtHandle, openStatements::decrementAndGet);
     }
 
     /** Rowid de la última inserción exitosa en esta conexión. */
@@ -196,18 +209,26 @@ public final class SqliteConnection implements AutoCloseable {
     }
 
     /**
-     * Ejecuta un WAL checkpoint.
+     * Ejecuta un WAL checkpoint y devuelve el resultado de observabilidad (R-4).
      *
      * @param mode    modo del checkpoint
      * @param dbName  nombre de la BD adjunta, o {@code null} para "main"
+     * @return resultado con {@code walFrames} y {@code checkpointed}
      * @throws SqliteException en error
      */
-    public SqliteConnection walCheckpoint(WalMode mode, String dbName) {
+    public WalCheckpointResult walCheckpoint(WalMode mode, String dbName) {
         checkOpen();
-        if (SqliteLibrary.snr_wal_checkpoint(handle, dbName, mode.value) != 0) {
-            throw new SqliteException("walCheckpoint(%s) falló: %s".formatted(mode, lastError()));
+        try (var arena = Arena.ofConfined()) {
+            var outWalFrames    = arena.allocate(ValueLayout.JAVA_INT);
+            var outCheckpointed = arena.allocate(ValueLayout.JAVA_INT);
+            if (SqliteLibrary.snr_wal_checkpoint(handle, dbName, mode.value,
+                    outWalFrames, outCheckpointed) != 0) {
+                throw new SqliteException("walCheckpoint(%s) falló: %s".formatted(mode, lastError()));
+            }
+            return new WalCheckpointResult(
+                outWalFrames.get(ValueLayout.JAVA_INT, 0),
+                outCheckpointed.get(ValueLayout.JAVA_INT, 0));
         }
-        return this;
     }
 
     /**
@@ -356,10 +377,21 @@ public final class SqliteConnection implements AutoCloseable {
 
     // ── AutoCloseable ────────────────────────────────────────────────────────
 
+    /**
+     * Cierra la conexión. Si hay statements abiertos creados por {@link #prepare},
+     * emite un warning — esos statements mantienen el handle Rust vivo hasta que
+     * se cierren, pero esta instancia Java ya no es utilizable.
+     */
     @Override
     public void close() {
         if (!closed) {
             closed = true;
+            int open = openStatements.get();
+            if (open > 0) {
+                LOG.warning("[snr] conexión cerrada con " + open
+                    + " statement(s) aún abiertos — posible resource leak. "
+                    + "Cierra siempre los SqliteStatement antes de SqliteConnection.");
+            }
             SqliteLibrary.snr_close(handle);
         }
     }
@@ -371,9 +403,12 @@ public final class SqliteConnection implements AutoCloseable {
         return SqliteStatement.readAndFreeString(SqliteLibrary.snr_sqlite_version());
     }
 
-    /** Último error del hilo actual reportado por Rust. */
+    /**
+     * Último error del hilo actual reportado por Rust.
+     * Usa {@code snr_last_error_copy()} para ser seguro con Project Loom (R-1).
+     */
     public static String lastError() {
-        return SqliteStatement.readInternalString(SqliteLibrary.snr_last_error());
+        return SqliteStatement.readAndFreeString(SqliteLibrary.snr_last_error_copy());
     }
 
     // ── Helpers privados ──────────────────────────────────────────────────────

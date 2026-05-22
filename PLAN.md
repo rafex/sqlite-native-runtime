@@ -1,8 +1,8 @@
 # PLAN — sqlite-native-runtime · Revisión de seguridad y hardening
 
 **Última actualización:** 2026-05-21
-**Estado general:** Todos los hallazgos de seguridad corregidos. Deuda técnica menor parcialmente resuelta.
-**Commit base:** `7b25047` · **Commit hotfixes CRÍTICO/ALTO:** `c7989d6` · **Commit MEDIO/INFO:** `411a66f` · **Commit deuda técnica:** `730effd`
+**Estado general:** Correcciones de seguridad completas. Revisión arquitectónica completada (R-1..R-9).
+**Commit base:** `7b25047` · **Commit hotfixes CRÍTICO/ALTO:** `c7989d6` · **Commit MEDIO/INFO:** `411a66f` · **Commit deuda técnica:** `730effd` · **Commit revisión arquitectónica:** `TBD`
 
 ---
 
@@ -32,6 +32,7 @@ La revisión identificó **11 hallazgos** clasificados en cuatro niveles de seve
 | **SEC-INFORMATIVO · Hotfix I-2** | ✅ Completada | 100% | `c7989d6` | 0.5 h |
 | **SEC-MEDIO · M-1, M-2, M-3** | ✅ Completada | 100% | `411a66f` | 2 h |
 | **SEC-INFO · I-1 ruta relativa Java** | ✅ Completada | 100% | `411a66f` | 0.5 h |
+| **ARCH · Revisión arquitectónica R-1..R-9** | ✅ Completada | 100% | `TBD` | 3 h |
 | **BUILD · Cross-compilación Linux** | ⏳ Pendiente | 0% | — | ~2 h |
 | **CI · Smoke test automatizado** | ⏳ Pendiente | 0% | — | ~2 h |
 
@@ -340,6 +341,166 @@ if (!candidate.isAbsolute()) {
 }
 ```
 Comentario de "solo para desarrollo" añadido al bloque de candidatos relativos.
+
+---
+
+---
+
+## ✅ REVISIÓN ARQUITECTÓNICA (R-1..R-9)
+
+Análisis como arquitecto de software ejecutado en `2026-05-21`. Nueve hallazgos corregidos.
+
+---
+
+### R-1 · `SqliteConnection.lastError()` usaba puntero interno inseguro con Loom ✅
+
+**Archivo:** `java/.../SqliteConnection.java`
+
+`lastError()` usaba `readInternalString(snr_last_error())` — el mismo puntero thread-local
+que se advirtió en M-1. Con virtual threads, el mensaje en la excepción podía corresponder
+a un error de otro virtual thread.
+
+**Fix:** cambiado a `readAndFreeString(snr_last_error_copy())`, consistente con
+`SqliteStatement.lastError()`.
+
+---
+
+### R-2 · Modelo de threading no documentado en `SqliteStatement` ✅
+
+**Archivo:** `java/.../SqliteStatement.java`
+
+Añadida sección "Modelo de threading" al Javadoc de clase explicando que el objeto
+no es thread-safe para secuencias de llamadas (cada llamada individual está serializada,
+pero secuencias como `columnText()` + `columnBytes()` no son atómicas).
+
+---
+
+### R-3 · `SQLITE_OPEN_NOFOLLOW` ausente de los flags por defecto ✅
+
+**Archivo:** `rust/src/connection.rs`
+
+El default `flags == 0` no incluía `SQLITE_OPEN_NOFOLLOW`. Un atacante con acceso
+al filesystem podría plantar un symlink para redirigir la apertura.
+
+**Fix:**
+```rust
+ffi::SQLITE_OPEN_READWRITE | ffi::SQLITE_OPEN_CREATE
+    | ffi::SQLITE_OPEN_FULLMUTEX | ffi::SQLITE_OPEN_NOFOLLOW
+```
+
+---
+
+### R-4 · WAL checkpoint descartaba n_log y n_ckpt ✅
+
+**Archivos:** `rust/src/wal.rs`, `SqliteLibrary.java`, `SqliteConnection.java`
+
+`sqlite3_wal_checkpoint_v2` calculaba los frames WAL pero los descartaba. Sin esta
+información es imposible diagnosticar WAL growth en producción.
+
+**Fix:** `snr_wal_checkpoint` recibe dos punteros de salida opcionales `*mut i32`:
+
+```rust
+pub unsafe extern "C" fn snr_wal_checkpoint(
+    handle, db_name, mode,
+    out_wal_frames: *mut i32,   // nullable
+    out_checkpointed: *mut i32, // nullable
+) -> i32
+```
+
+`SqliteConnection.walCheckpoint()` ahora devuelve `WalCheckpointResult(walFrames, checkpointed)`:
+
+```java
+WalCheckpointResult r = db.walCheckpoint(WalMode.TRUNCATE, null);
+// r.walFrames(), r.checkpointed()
+```
+
+---
+
+### R-5 · Doble capa de locking documentada ✅
+
+**Archivo:** `rust/src/handle.rs`
+
+Con `SQLITE_OPEN_FULLMUTEX`, SQLite serializa internamente. El `Mutex<RawConn>` en Rust
+no añade serialización de operaciones — su rol es proporcionar `Send` seguro al Arc y
+garantizar exclusión mutua en el `Drop`. Documentado con comentario extendido en `Handle`.
+
+---
+
+### R-6 · Constantes de apertura exportadas como funciones ✅
+
+**Archivo:** `java/.../SqliteLibrary.java`
+
+`snr_flag_readonly()`, `snr_flag_readwrite()`, `snr_flag_create()` eran downcalls FFI
+para devolver constantes conocidas en tiempo de compilación. Añadidas como constantes Java:
+
+```java
+public static final int OPEN_READONLY  = 0x00000001;
+public static final int OPEN_READWRITE = 0x00000002;
+public static final int OPEN_CREATE    = 0x00000004;
+public static final int OPEN_NOFOLLOW  = 0x01000000;
+```
+
+Los valores son parte de la especificación SQLite y no cambiarán.
+
+---
+
+### R-7 · `clear_last_error()` inconsistente en funciones bind y column ✅
+
+**Archivo:** `rust/src/statement.rs`
+
+Las funciones `snr_bind_null/int/double/text/blob`, `snr_bind_parameter_index` y todas
+las `snr_column_*` no llamaban `clear_last_error()` al inicio. Un error previo
+podía persistir aunque la operación siguiente tuviera éxito.
+
+**Fix:** `clear_last_error()` añadida al inicio de todas las funciones afectadas.
+Además, `snr_bind_parameter_index` ahora establece error explícito si `name` es NULL
+(antes devolvía 0 silenciosamente sin distinguir "parámetro no encontrado" de "name nulo").
+
+---
+
+### R-8 · `snr_column_text_owned` hacía dos allocaciones ✅
+
+**Archivo:** `rust/src/statement.rs`
+
+```rust
+// Antes: String + CString (dos heap allocations)
+let s = CStr::from_ptr(ptr).to_string_lossy().into_owned();
+CString::new(s)?.into_raw()
+
+// Después: CString directo (una sola allocation)
+CStr::from_ptr(ptr as *const c_char).to_owned().into_raw()
+```
+
+---
+
+### R-9 · Sin detección de resource leaks al cerrar conexión ✅
+
+**Archivos:** `SqliteConnection.java`, `SqliteStatement.java`
+
+`SqliteStatement` acepta un `Runnable onClose` opcional. `SqliteConnection.prepare()`
+lo usa para mantener un `AtomicInteger openStatements`. Al llamar `close()` en la conexión
+se emite un `WARNING` en el logger si hay statements aún abiertos:
+
+```
+[snr] conexión cerrada con N statement(s) aún abiertos — posible resource leak.
+```
+
+---
+
+### R-panic · `set_last_error` podía hacer panic a través del boundary FFI ✅
+
+**Archivo:** `rust/src/error.rs`
+
+El fallback usaba `.expect("static string")`. Un panic a través del boundary FFI es UB en Rust.
+
+**Fix:** truncar en el primer byte nulo con `from_vec_unchecked` — nunca puede fallar:
+```rust
+let nul_pos = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+let cs = unsafe { CString::from_vec_unchecked(bytes[..nul_pos].to_vec()) };
+```
+
+También, `snr_last_error_copy()` reemplaza el `CString::new(cs.as_bytes()).unwrap_or_else`
+por `CStr::to_owned()` que clona directamente sin poder fallar.
 
 ---
 

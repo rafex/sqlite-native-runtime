@@ -35,6 +35,19 @@ impl Drop for RawConn {
 /// Handle opaco que Java recibe de `snr_open`.
 /// La conexión SQLite se cierra automáticamente cuando todos los Arcs
 /// (Handle + StmtHandles activos) son liberados.
+///
+/// # Sobre el Mutex
+///
+/// `SQLITE_OPEN_FULLMUTEX` (forzado en `snr_open`) hace que SQLite serialice
+/// internamente todas las operaciones. El `Mutex<RawConn>` aquí no duplica esa
+/// serialización — su único rol es:
+///   1. Proporcionar `Send` seguro al Arc (Rust requiere `Sync` para compartir entre hilos).
+///   2. Garantizar que `sqlite3_close` en `RawConn::Drop` se ejecuta con exclusión
+///      mutua respecto a cualquier operación activa en el momento del cierre.
+///
+/// NO garantiza atomicidad de secuencias multi-llamada (p.ej. `column_text` +
+/// `column_bytes`): el lock se libera entre llamadas. Para uso multi-hilo real,
+/// el caller debe sincronizar externamente las secuencias que necesiten ser atómicas.
 pub struct Handle {
     pub(crate) inner: Arc<Mutex<RawConn>>,
 }

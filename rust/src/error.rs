@@ -7,9 +7,12 @@ thread_local! {
 }
 
 pub(crate) fn set_last_error(msg: impl Into<Vec<u8>>) {
-    let cs = CString::new(msg).unwrap_or_else(|_| {
-        CString::new("error interno con bytes nulos").expect("static string")
-    });
+    let bytes: Vec<u8> = msg.into();
+    // Truncar en el primer byte nulo: CString no puede contener bytes nulos internos.
+    // Esta función nunca puede entrar en pánico — un panic a través del boundary FFI es UB.
+    let nul_pos = bytes.iter().position(|&b| b == 0).unwrap_or(bytes.len());
+    // SAFETY: hemos eliminado todos los bytes nulos internos.
+    let cs = unsafe { CString::from_vec_unchecked(bytes[..nul_pos].to_vec()) };
     LAST_ERROR.with(|cell| *cell.borrow_mut() = Some(cs));
 }
 
@@ -17,13 +20,12 @@ pub(crate) fn clear_last_error() {
     LAST_ERROR.with(|cell| *cell.borrow_mut() = None);
 }
 
-/// Devuelve puntero interno al último error del hilo. Java NO debe liberarlo.
+/// Devuelve puntero interno del hilo al último error. Java NO debe liberarlo.
 /// Válido hasta la siguiente llamada a cualquier función snr_*.
 ///
-/// ADVERTENCIA con Project Loom: si dos virtual threads comparten el mismo
-/// carrier thread OS, el error del hilo puede ser sobreescrito entre la llamada
-/// que lo generó y la lectura de este puntero. Usar snr_last_error_copy() para
-/// obtener una copia segura en entornos con virtual threads.
+/// ADVERTENCIA con Project Loom: si dos virtual threads comparten el mismo carrier
+/// thread OS, el error puede sobreescribirse entre la llamada que lo generó y la
+/// lectura de este puntero. Usar `snr_last_error_copy()` en entornos con virtual threads.
 #[no_mangle]
 pub extern "C" fn snr_last_error() -> *const c_char {
     LAST_ERROR.with(|cell| {
@@ -34,20 +36,22 @@ pub extern "C" fn snr_last_error() -> *const c_char {
 }
 
 /// Devuelve una COPIA en heap del último error del hilo.
-/// Java DEBE liberar el resultado con snr_free_string cuando termine.
+/// Java DEBE liberar el resultado con `snr_free_string` cuando termine.
 /// Devuelve NULL si no hay error pendiente.
 ///
 /// Seguro con Project Loom: la copia se toma en el instante de la llamada,
-/// evitando que otra virtual thread en el mismo carrier sobreescriba el mensaje
-/// antes de que Java pueda leerlo.
+/// evitando carreras con otras virtual threads en el mismo carrier OS.
 #[no_mangle]
 pub extern "C" fn snr_last_error_copy() -> *mut c_char {
     LAST_ERROR.with(|cell| {
         match cell.borrow().as_ref() {
             None => std::ptr::null_mut(),
-            Some(cs) => match CString::new(cs.as_bytes()) {
-                Ok(copy) => copy.into_raw(),
-                Err(_) => std::ptr::null_mut(),
+            Some(cs) => {
+                // Clonar bytes y construir nueva CString — nunca puede fallar porque
+                // la CString de origen ya fue validada al crearse en set_last_error.
+                // SAFETY: cs.as_bytes() no contiene bytes nulos internos por construcción.
+                let copy = unsafe { CString::from_vec_unchecked(cs.as_bytes().to_vec()) };
+                copy.into_raw()
             }
         }
     })
