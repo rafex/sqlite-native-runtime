@@ -285,8 +285,14 @@ public final class SqliteStatement implements AutoCloseable {
 
     // ── Puntero raw ──────────────────────────────────────────────────────────
 
-    /** Puntero raw al StmtHandle de Rust (para uso avanzado con SqliteLibrary directamente). */
+    /**
+     * Puntero raw al StmtHandle de Rust (para uso avanzado con SqliteLibrary directamente).
+     *
+     * @throws SqliteException si el statement ya fue cerrado — el handle liberado
+     *         causaría use-after-free en Rust
+     */
     public MemorySegment rawHandle() {
+        checkOpen();
         return stmt;
     }
 

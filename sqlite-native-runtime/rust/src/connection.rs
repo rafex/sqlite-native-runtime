@@ -57,14 +57,17 @@ pub unsafe extern "C" fn snr_open(path: *const c_char, flags: i32) -> *mut Handl
         | ffi::SQLITE_OPEN_NOFOLLOW as i32; // rechaza symlinks
 
     let open_flags = if flags == 0 {
-        // SQLITE_OPEN_NOFOLLOW incluido por defecto: rechaza symlinks para evitar
-        // que un atacante redirija la apertura a un archivo arbitrario.
+        // Flags por defecto: read-write + create + serialized + nofollow.
         ffi::SQLITE_OPEN_READWRITE
             | ffi::SQLITE_OPEN_CREATE
             | ffi::SQLITE_OPEN_FULLMUTEX
             | ffi::SQLITE_OPEN_NOFOLLOW
     } else {
-        (flags & ALLOWED_FLAGS) | ffi::SQLITE_OPEN_FULLMUTEX
+        // SQLITE_OPEN_FULLMUTEX y SQLITE_OPEN_NOFOLLOW siempre forzados,
+        // independientemente de los flags que pase el caller.
+        // NOFOLLOW es opt-out (no opt-in): el caller debe pasar flags=0 o
+        // incluirlo explícitamente si quiere symlinks (no recomendado).
+        (flags & ALLOWED_FLAGS) | ffi::SQLITE_OPEN_FULLMUTEX | ffi::SQLITE_OPEN_NOFOLLOW
     };
 
     let mut db: *mut ffi::sqlite3 = std::ptr::null_mut();

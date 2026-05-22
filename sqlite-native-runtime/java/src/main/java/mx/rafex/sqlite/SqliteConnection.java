@@ -370,8 +370,14 @@ public final class SqliteConnection implements AutoCloseable {
 
     // ── Handle raw ───────────────────────────────────────────────────────────
 
-    /** Puntero raw al Handle de Rust (para uso avanzado con SqliteLibrary directamente). */
+    /**
+     * Puntero raw al Handle de Rust (para uso avanzado con SqliteLibrary directamente).
+     *
+     * @throws SqliteException si la conexión ya fue cerrada — el handle liberado
+     *         causaría use-after-free en Rust
+     */
     public MemorySegment rawHandle() {
+        checkOpen();
         return handle;
     }
 
