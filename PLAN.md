@@ -2,7 +2,7 @@
 
 **Última actualización:** 2026-05-21
 **Estado general:** Todos los hallazgos de seguridad corregidos. Deuda técnica menor parcialmente resuelta.
-**Commit base:** `7b25047` · **Commit hotfixes CRÍTICO/ALTO:** `c7989d6` · **Commit MEDIO/INFO:** `411a66f` · **Commit deuda técnica:** `TBD`
+**Commit base:** `7b25047` · **Commit hotfixes CRÍTICO/ALTO:** `c7989d6` · **Commit MEDIO/INFO:** `411a66f` · **Commit deuda técnica:** `730effd`
 
 ---
 
