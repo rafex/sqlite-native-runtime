@@ -3,16 +3,18 @@
 #
 # Dispara en: push de un tag con patrón v* (ej. v0.1.0, v1.2.3)
 #
-# Artefactos publicados en el GitHub Release:
-#   libsqlite_native_runtime-linux-amd64.so      ← Rust nativo en runner x86_64
+# Artefactos publicados en el GitHub Release (12 ficheros):
+#   libsqlite_native_runtime-linux-amd64.so      ← Rust nativo, runner x86_64
 #   libsqlite_native_runtime-linux-amd64.so.sha256
-#   libsqlite_native_runtime-linux-arm64.so      ← Rust nativo en runner arm64
+#   libsqlite_native_runtime-linux-arm64.so      ← Rust nativo, runner arm64
 #   libsqlite_native_runtime-linux-arm64.so.sha256
-#   sqlite-native-runtime-{version}.jar          ← Java JAR
+#   sqlite-native-runtime-{version}.jar          ← Java thin JAR (para Maven/Gradle)
 #   sqlite-native-runtime-{version}.jar.sha256
-#   snr-smoke-linux-amd64                        ← GraalVM Native Image x86_64
+#   sqlite-native-runtime-{version}-fat.jar      ← Java fat JAR  (standalone, sin deps externas)
+#   sqlite-native-runtime-{version}-fat.jar.sha256
+#   snr-smoke-linux-amd64                        ← GraalVM Native Image, runner x86_64
 #   snr-smoke-linux-amd64.sha256
-#   snr-smoke-linux-arm64                        ← GraalVM Native Image arm64
+#   snr-smoke-linux-arm64                        ← GraalVM Native Image, runner arm64
 #   snr-smoke-linux-arm64.sha256
 #
 # Grafo de dependencias (matrix collapsa los jobs por arquitectura):
@@ -112,12 +114,14 @@ jobs:
           name: rust-lib-${{ matrix.arch }}
           path: dist/
 
-  # ── 2. Construir el JAR Java ─────────────────────────────────────────────────
+  # ── 2. Construir los JARs Java ───────────────────────────────────────────────
   #
-  # El JAR no depende de la arquitectura (bytecode portable).
-  # Un único job ubuntu-latest con GraalVM JDK 25 es suficiente.
+  # El JAR no depende de la arquitectura (bytecode portable): un único job.
+  # maven-shade-plugin produce dos artefactos durante `mvn package`:
+  #   sqlite-native-runtime-{version}.jar      ← thin JAR (gestores de dependencias)
+  #   sqlite-native-runtime-{version}-fat.jar  ← fat JAR (distribución standalone)
   build-java-jar:
-    name: "☕ Java JAR"
+    name: "☕ Java JAR (thin + fat)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -144,16 +148,20 @@ jobs:
           ./mvnw versions:set -DnewVersion="${VERSION}" -DgenerateBackupPoms=false \
             --no-transfer-progress -q
 
-      - name: Build JAR (tests validados en CI)
+      # maven-shade-plugin corre en la fase package y produce ambos JARs
+      - name: Build thin JAR + fat JAR (tests validados en CI)
         working-directory: sqlite-native-runtime/java
         run: ./mvnw package -DskipTests --no-transfer-progress
 
-      - name: Collect artifact
+      # Recoger los dos JARs con nombres explícitos para el release
+      - name: Collect artifacts
         run: |
           mkdir -p dist
           VERSION="${GITHUB_REF_NAME#v}"
           cp "sqlite-native-runtime/java/target/sqlite-native-runtime-${VERSION}.jar" \
              "dist/sqlite-native-runtime-${VERSION}.jar"
+          cp "sqlite-native-runtime/java/target/sqlite-native-runtime-${VERSION}-fat.jar" \
+             "dist/sqlite-native-runtime-${VERSION}-fat.jar"
 
       - uses: actions/upload-artifact@v4
         with:
