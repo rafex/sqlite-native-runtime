@@ -1,27 +1,27 @@
 cargo  := "$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin/cargo"
 rustc  := "$HOME/.rustup/toolchains/stable-aarch64-apple-darwin/bin/rustc"
-snr_lib := justfile_directory() + "/rust/target/release/libsqlite_native_runtime.dylib"
+snr_lib := justfile_directory() + "/sqlite-native-runtime/rust/target/release/libsqlite_native_runtime.dylib"
 
 default: build
 
 build: build-rust build-java
 
 build-rust:
-    cd rust && RUSTC={{rustc}} {{cargo}} build --release
+    cd sqlite-native-runtime/rust && RUSTC={{rustc}} {{cargo}} build --release
 
 build-java:
-    cd java && mvn compile -q
+    cd sqlite-native-runtime/java && mvn compile -q
 
 test: build
-    cd java && \
+    cd sqlite-native-runtime/java && \
         SNR_LIB={{snr_lib}} \
         java --enable-native-access=ALL-UNNAMED \
              -cp target/classes:target/test-classes -ea \
              mx.rafex.sqlite.SmokeTest
 
 clean:
-    cd rust && RUSTC={{rustc}} {{cargo}} clean
-    cd java && mvn clean -q
+    cd sqlite-native-runtime/rust && RUSTC={{rustc}} {{cargo}} clean
+    cd sqlite-native-runtime/java && mvn clean -q
 
 package: build
-    cd java && mvn package -q
+    cd sqlite-native-runtime/java && mvn package -q

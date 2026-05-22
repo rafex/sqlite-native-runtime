@@ -18,13 +18,14 @@ Java (Panama FFI)
 ## Estructura
 
 ```
-rust/          Crate Rust — C ABI (cdylib + staticlib)
-java/          Biblioteca Java Maven (Java 22, Panama FFI)
-  src/main/java/mx/rafex/sqlite/
-    SqliteLibrary.java    — bindings de bajo nivel (MethodHandle por símbolo snr_*)
-    SqliteConnection.java — conexión de alto nivel (AutoCloseable)
-    SqliteStatement.java  — prepared statement (AutoCloseable)
-    SqliteException.java  — excepción runtime
+sqlite-native-runtime/
+  rust/          Crate Rust — C ABI (cdylib + staticlib)
+  java/          Biblioteca Java Maven (Java 22, Panama FFI)
+    src/main/java/mx/rafex/sqlite/
+      SqliteLibrary.java    — bindings de bajo nivel (MethodHandle por símbolo snr_*)
+      SqliteConnection.java — conexión de alto nivel (AutoCloseable)
+      SqliteStatement.java  — prepared statement (AutoCloseable)
+      SqliteException.java  — excepción runtime
 ```
 
 ## Build
@@ -48,7 +49,7 @@ make package      # genera JAR en java/target/
 ```bash
 make package
 mvn install:install-file \
-  -Dfile=java/target/sqlite-native-runtime-0.1.0.jar \
+  -Dfile=sqlite-native-runtime/java/target/sqlite-native-runtime-0.1.0.jar \
   -DgroupId=mx.rafex -DartifactId=sqlite-native-runtime \
   -Dversion=0.1.0 -Dpackaging=jar
 ```
