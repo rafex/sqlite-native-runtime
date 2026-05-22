@@ -1,9 +1,12 @@
-# Rust
-rust/target/
+# Rust build artifacts
+sqlite-native-runtime/rust/target/
 
-# Java / Maven
-java/target/
-java/.mvn/wrapper/maven-wrapper.jar
+# Java / Maven build artifacts
+sqlite-native-runtime/java/target/
+
+# Maven wrapper jar (descargado automáticamente por mvnw)
+sqlite-native-runtime/java/.mvn/wrapper/maven-wrapper.jar
+
 *.class
 
 # OS
