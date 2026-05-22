@@ -136,7 +136,8 @@ unsafe fn exec_with_name(
         Some(s) => s,
         None => { set_last_error(format!("{caller}: name nulo o no es UTF-8")); return -1; }
     };
-    // Construir SQL: SAVEPOINT "nombre" (comillas para escapar nombres con espacios)
-    let sql = format!("{command} \"{name_str}\"\0");
+    // Escapar " como "" (SQL identifier escaping) para prevenir inyección SQL (C-2).
+    let safe_name = name_str.replace('"', "\"\"");
+    let sql = format!("{command} \"{safe_name}\"\0");
     exec_simple(handle, sql.as_bytes(), caller)
 }

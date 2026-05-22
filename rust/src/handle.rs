@@ -2,15 +2,39 @@ use std::sync::{Arc, Mutex};
 
 /// Newtype sobre el puntero SQLite para poder implementar Send.
 /// `sqlite3` con SQLITE_THREADSAFE=1 (default bundled) es thread-safe
-/// a nivel C, pero Rust requiere que declaremos Send explícitamente.
+/// a nivel C, pero Rust requiere declarar Send explícitamente.
 pub(crate) struct RawConn(pub *mut libsqlite3_sys::sqlite3);
 
 // SAFETY: bundled SQLite compila con SQLITE_THREADSAFE=1 (serialized mode).
-// La serialización adicional del Mutex en Handle es una capa extra de seguridad.
+// El Mutex en Handle es una capa adicional de serialización desde Rust.
 unsafe impl Send for RawConn {}
 
+impl Drop for RawConn {
+    fn drop(&mut self) {
+        // SAFETY: cuando Drop se ejecuta el Arc<Mutex<RawConn>> tiene refcount=0,
+        // lo que garantiza que ningún otro hilo puede acceder a self.0 en este momento.
+        // Todos los StmtHandle (que también sostienen Arcs) ya han sido dropeados y
+        // sus sqlite3_stmt* finalizados ANTES de llegar aquí, por lo que
+        // sqlite3_close no retornará SQLITE_BUSY en uso normal.
+        if !self.0.is_null() {
+            let rc = unsafe { libsqlite3_sys::sqlite3_close(self.0) };
+            if rc != libsqlite3_sys::SQLITE_OK {
+                // No se puede propagar error desde Drop. Si ocurre SQLITE_BUSY significa
+                // que hay statements sin finalizar — fallo del llamador, no de la librería.
+                eprintln!(
+                    "sqlite-native-runtime: sqlite3_close devolvió rc={} — \
+                     posibles statements sin cerrar antes de snr_close",
+                    rc
+                );
+            }
+            self.0 = std::ptr::null_mut();
+        }
+    }
+}
+
 /// Handle opaco que Java recibe de `snr_open`.
-/// Envuelve la conexión SQLite con un Mutex para serializar llamadas concurrentes.
+/// La conexión SQLite se cierra automáticamente cuando todos los Arcs
+/// (Handle + StmtHandles activos) son liberados.
 pub struct Handle {
     pub(crate) inner: Arc<Mutex<RawConn>>,
 }
@@ -20,14 +44,6 @@ impl Handle {
         Self {
             inner: Arc::new(Mutex::new(RawConn(conn))),
         }
-    }
-}
-
-impl Drop for Handle {
-    fn drop(&mut self) {
-        // Si el Arc ya no tiene otras referencias (statements abiertos),
-        // la conexión se cierra aquí a través de snr_close.
-        // La cerramos explícitamente en snr_close para control total.
     }
 }
 

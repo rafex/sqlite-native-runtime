@@ -37,16 +37,9 @@ pub unsafe extern "C" fn snr_open(path: *const c_char, flags: i32) -> *mut Handl
         }
     };
 
-    // Crear directorio padre si no existe (igual que en el código existente)
-    if let Some(parent) = std::path::Path::new(path_str).parent() {
-        if !parent.as_os_str().is_empty() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                set_last_error(format!("snr_open: no se pudo crear directorio {parent:?}: {e}"));
-                return std::ptr::null_mut();
-            }
-        }
-    }
-
+    // El directorio padre debe existir antes de llamar snr_open.
+    // Crear directorios arbitrarios desde una librería FFI es un vector de
+    // directory-traversal — se elimina deliberadamente.
     let c_path = match CString::new(path_str) {
         Ok(s) => s,
         Err(e) => {
@@ -55,10 +48,18 @@ pub unsafe extern "C" fn snr_open(path: *const c_char, flags: i32) -> *mut Handl
         }
     };
 
+    // Enmascarar a solo los flags públicamente permitidos (I-2).
+    // Flags internos de SQLite (DELETEONCLOSE, TEMP_DB, etc.) no son accesibles.
+    const ALLOWED_FLAGS: i32 = ffi::SQLITE_OPEN_READONLY as i32
+        | ffi::SQLITE_OPEN_READWRITE as i32
+        | ffi::SQLITE_OPEN_CREATE as i32
+        | ffi::SQLITE_OPEN_URI as i32
+        | ffi::SQLITE_OPEN_NOFOLLOW as i32; // rechaza symlinks
+
     let open_flags = if flags == 0 {
         ffi::SQLITE_OPEN_READWRITE | ffi::SQLITE_OPEN_CREATE | ffi::SQLITE_OPEN_FULLMUTEX
     } else {
-        flags | ffi::SQLITE_OPEN_FULLMUTEX
+        (flags & ALLOWED_FLAGS) | ffi::SQLITE_OPEN_FULLMUTEX
     };
 
     let mut db: *mut ffi::sqlite3 = std::ptr::null_mut();
@@ -93,7 +94,17 @@ pub unsafe extern "C" fn snr_open_memory(name: *const c_char) -> *mut Handle {
         CString::new(":memory:").unwrap()
     } else {
         match cstr_to_str(name) {
-            Some(n) => CString::new(format!("file:{n}?mode=memory&cache=shared")).unwrap(),
+            Some(n) => {
+                // Sanear el nombre: solo [A-Za-z0-9_-] para evitar URI injection (A-2).
+                // Caracteres como '?', '&', '/' romperían la URI y podrían abrir archivos reales.
+                if !n.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-') {
+                    set_last_error(
+                        "snr_open_memory: name inválido — solo [A-Za-z0-9_-] permitido"
+                    );
+                    return std::ptr::null_mut();
+                }
+                CString::new(format!("file:{n}?mode=memory&cache=shared")).unwrap()
+            }
             None => {
                 set_last_error("snr_open_memory: name no es UTF-8 válido");
                 return std::ptr::null_mut();
@@ -128,25 +139,24 @@ pub unsafe extern "C" fn snr_open_memory(name: *const c_char) -> *mut Handle {
 
 /// Cierra la conexión y libera el Handle. No usar `handle` después de esta llamada.
 ///
+/// La conexión SQLite se cierra físicamente cuando TODOS los StmtHandle derivados
+/// de esta conexión también hayan sido cerrados con `snr_stmt_close`. Si hay
+/// statements abiertos al llamar `snr_close`, SQLite permanecerá abierto hasta
+/// que el último statement se finalice — comportamiento correcto y sin use-after-free.
+///
 /// # Safety
-/// `handle` debe ser un puntero válido obtenido de `snr_open` o `snr_open_memory`.
+/// `handle` debe ser un puntero válido obtenido de `snr_open` o `snr_open_memory`,
+/// y NO debe usarse después de esta llamada. Llamar exactamente una vez por handle.
 #[no_mangle]
 pub unsafe extern "C" fn snr_close(handle: *mut Handle) {
-    if handle.is_null() {
-        return;
+    if !handle.is_null() {
+        // Soltar el Box libera el Arc<Mutex<RawConn>> del Handle.
+        // Si ningún StmtHandle activo sostiene otro Arc, el refcount llega a 0
+        // y RawConn::drop llama sqlite3_close automáticamente.
+        // Si hay statements abiertos, el Arc sigue vivo en ellos y sqlite3_close
+        // se llamará cuando el último snr_stmt_close libere su Arc. (C-1)
+        drop(Box::from_raw(handle));
     }
-    let h = Box::from_raw(handle);
-    // Extraemos el raw pointer antes de que h sea consumido por el Drop.
-    let raw_db = {
-        match h.inner.lock() {
-            Ok(g) => g.0,
-            Err(e) => e.into_inner().0,
-        }
-    };
-    // h cae aquí → Arc decrementado. Si no hay más referencias (statements cerrados),
-    // ahora es seguro cerrar la conexión.
-    drop(h);
-    ffi::sqlite3_close(raw_db);
 }
 
 // ─── snr_ping ────────────────────────────────────────────────────────────────
