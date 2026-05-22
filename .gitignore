@@ -4,9 +4,6 @@ sqlite-native-runtime/rust/target/
 # Java / Maven build artifacts
 sqlite-native-runtime/java/target/
 
-# Maven wrapper jar (descargado automáticamente por mvnw)
-sqlite-native-runtime/java/.mvn/wrapper/maven-wrapper.jar
-
 # Maven wrapper Windows (no aplica — proyecto macOS/Linux)
 sqlite-native-runtime/java/mvnw.cmd
 
