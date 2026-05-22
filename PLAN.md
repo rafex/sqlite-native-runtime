@@ -1,8 +1,8 @@
 # PLAN — sqlite-native-runtime · Revisión de seguridad y hardening
 
-**Última actualización:** 2026-05-21
-**Estado general:** Correcciones de seguridad completas. Revisión arquitectónica completada (R-1..R-9).
-**Commit base:** `7b25047` · **Commit hotfixes CRÍTICO/ALTO:** `c7989d6` · **Commit MEDIO/INFO:** `411a66f` · **Commit deuda técnica:** `730effd` · **Commit revisión arquitectónica:** `1e6018c`
+**Última actualización:** 2026-05-22
+**Estado general:** Correcciones de seguridad completas. Revisión arquitectónica completada (R-1..R-9). Java unit tests implementados (128 tests, 99% LINE). Estrategia de tests completa en `docs/testing/strategy.md`.
+**Commit base:** `7b25047` · **Commit hotfixes CRÍTICO/ALTO:** `c7989d6` · **Commit MEDIO/INFO:** `411a66f` · **Commit deuda técnica:** `730effd` · **Commit revisión arquitectónica:** `1e6018c` · **Commit Java unit tests:** `ae951c7`
 
 ---
 
@@ -33,8 +33,13 @@ La revisión identificó **11 hallazgos** clasificados en cuatro niveles de seve
 | **SEC-MEDIO · M-1, M-2, M-3** | ✅ Completada | 100% | `411a66f` | 2 h |
 | **SEC-INFO · I-1 ruta relativa Java** | ✅ Completada | 100% | `411a66f` | 0.5 h |
 | **ARCH · Revisión arquitectónica R-1..R-9** | ✅ Completada | 100% | `1e6018c` | 3 h |
-| **BUILD · Cross-compilación Linux** | ⏳ Pendiente | 0% | — | ~2 h |
-| **CI · Smoke test automatizado** | ⏳ Pendiente | 0% | — | ~2 h |
+| **BUILD · Cross-compilación Linux** | ✅ Completada | 100% | `730effd` | ~2 h |
+| **Java unit tests (128 tests, 99% LINE)** | ✅ Completada | 100% | `ae951c7` | ~4 h |
+| **TT-1 · Rust unit tests** | ⏳ Pendiente | 0% | — | ~4-6 h |
+| **TT-2 · FFI contract tests** | ⏳ Pendiente | 0% | — | ~2-3 h |
+| **TT-3 · Java integration tests** | ⏳ Pendiente | 0% | — | ~4-6 h |
+| **TT-4a · GraalVM native SmokeTest** | ⏳ Pendiente | 0% | — | ~2 h |
+| **DT-5 · CI GitHub Actions** | ⏳ Pendiente | 0% | — | ~2 h |
 
 ---
 
@@ -508,16 +513,44 @@ por `CStr::to_owned()` que clona directamente sin poder fallar.
 
 ---
 
+## Estrategia de tests completa
+
+Ver `docs/testing/strategy.md` para el análisis detallado.
+Specs SpecNative creados: `agents/specs/TT-{1,2,3,4}/SPEC.md`.
+
+### Resumen de capas
+
+| Capa | Herramienta | Tests | Estado |
+|------|------------|-------|--------|
+| Java unit | JUnit 5 + JaCoCo | 128 (99% LINE) | ✅ |
+| Rust unit | `cargo test --lib` + llvm-cov | ~100 | ⏳ TT-1 |
+| FFI contract | `cargo test --test` | ~35 | ⏳ TT-2 |
+| Java integration | JUnit 5 `@Tag("integration")` | ~40 | ⏳ TT-3 |
+| GraalVM native | SmokeTest automatizado | ~15 escenarios | ⏳ TT-4a |
+
+### Por qué cuatro capas
+
+```
+Rust unit (TT-1)  → detecta bugs en lógica Rust sin cruzar FFI
+FFI contract (TT-2) → detecta bugs en el ABI C exportado
+Java integration (TT-3) → detecta bugs de concurrencia, WAL, escenarios reales
+Native (TT-4) → detecta bugs específicos de AOT / GraalVM
+```
+
+---
+
 ## Deuda técnica menor
 
 | ID | Archivo | Descripción | Prioridad | Estado |
 |----|---------|-------------|-----------|--------|
 | DT-1 | `rust/src/util.rs` | `cstr_to_string()` sin usar — eliminada | Baja | ✅ |
 | DT-2 | `rust/src/` | `cargo check` limpio — 0 warnings tras eliminar DT-1 | Media | ✅ |
-| DT-3 | `Makefile` | No hay target `cross` para compilar Linux aarch64/amd64 | Media | ⏳ |
-| DT-4 | `java/` | `mvn package` genera JAR pero no hay `mvn install` automático | Baja | ⏳ |
-| DT-5 | CI | No hay pipeline GitHub Actions para ejecutar smoke test en PR | Alta | ⏳ |
-| DT-6 | `README.md` | Actualizado a Java 22 + JEP 454 + `snr_last_error_copy` en tabla ABI | Baja | ✅ |
+| DT-3 | `Makefile` | Cross-compilación Linux aarch64/amd64 con cargo-zigbuild | Media | ✅ |
+| DT-4 | `java/` | Maven wrapper + `make install` | Baja | ✅ |
+| DT-5 | CI | Pipeline GitHub Actions (smoke + unit + Rust tests) | Alta | ⏳ |
+| DT-6 | `README.md` | Actualizado a Java 22 + JEP 454 + snr_last_error_copy | Baja | ✅ |
+| DT-7 | `java/` | `mvn verify` con JaCoCo 99% LINE — integrado | Baja | ✅ |
+| DT-8 | `java/` | JUnit 5 nativo (TT-4b) — GraalVM Build Tools native:test | Baja | ⏳ |
 
 ---
 
