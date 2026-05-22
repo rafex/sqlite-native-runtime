@@ -29,8 +29,14 @@
     <native.maven.plugin.version>0.10.6</native.maven.plugin.version>
   </properties>
 
-  <!-- Sin dependencias externas en compilacion. La unica dependencia runtime es
-       libsqlite_native_runtime.{so,dylib} cargada via Panama FFI. -->
+  <dependencies>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.11.4</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
 
   <build>
     <plugins>
@@ -42,6 +48,77 @@
         <!-- Sin compilerArgs adicionales: compilamos con GraalVM JDK 25 donde
              Panama FFM es estable. enable-preview solo aplica al release actual
              del JDK y no puede combinarse con un target anterior (release 21). -->
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.2</version>
+        <configuration>
+          <!--
+            Panama FFM necesita acceso nativo. JaCoCo inyecta su agente via @{argLine}
+            (late binding): se resuelve en tiempo de ejecucion para incluir el -javaagent
+            de JaCoCo. El argLine base añade el flag de Panama.
+          -->
+          <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>0.8.12</version>
+        <executions>
+          <!-- Prepara el agente JaCoCo antes de los tests (inyecta -javaagent en @{argLine}) -->
+          <execution>
+            <id>jacoco-prepare-agent</id>
+            <goals><goal>prepare-agent</goal></goals>
+          </execution>
+          <!-- Genera el reporte HTML tras los tests -->
+          <execution>
+            <id>jacoco-report</id>
+            <phase>test</phase>
+            <goals><goal>report</goal></goals>
+          </execution>
+          <!-- Verifica la cobertura al hacer mvn verify -->
+          <execution>
+            <id>jacoco-check</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>LINE</counter>
+                      <value>COVEREDRATIO</value>
+                      <!--
+                        0.99 en lugar de 1.00: existen exactamente 2 lineas de error
+                        genuinamente no-testeables sin mocking del runtime nativo:
+                          1. SqliteConnection.memory() anonima — el throw cuando
+                             sqlite3_open_v2(":memory:") falla (requiere OOM del SO).
+                          2. SqliteConnection.savepoint() — el throw cuando
+                             sqlite3_exec("SAVEPOINT ...") falla; imposible con el
+                             escape de comillas actual y una conexion valida.
+                        Todas las demas ramas de error estan cubiertas.
+                      -->
+                      <minimum>0.99</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+              <!--
+                SqliteLibrary se excluye porque su bloque static loadLibrary()
+                contiene ramas de fallback que requieren manipulacion del filesystem
+                o variables de entorno y no son testeables sin un agente de byte-code.
+              -->
+              <excludes>
+                <exclude>mx/rafex/sqlite/SqliteLibrary.class</exclude>
+              </excludes>
+            </configuration>
+          </execution>
+        </executions>
       </plugin>
 
       <plugin>

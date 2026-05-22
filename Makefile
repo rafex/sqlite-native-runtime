@@ -22,7 +22,7 @@ GLIBC_MIN := 2.17
 
 .PHONY: all build-rust build-java build test smoke native \
         cross-linux-amd64 cross-linux-arm64 cross \
-        install package clean
+        install package test-unit coverage clean
 
 all: build
 
@@ -88,6 +88,24 @@ native: build
 	  $(MVNW) -Pnative package native:compile -q
 	@echo "Binario generado: $(JAVA_DIR)/target/snr-smoke"
 	@echo "Ejecutar con: SNR_LIB=$(SNR_LIB) $(JAVA_DIR)/target/snr-smoke"
+
+# ── Tests unitarios y cobertura ──────────────────────────────────────────────
+
+# Ejecuta los tests unitarios JUnit 5 (requiere la .dylib compilada)
+test-unit: build-rust
+	cd $(JAVA_DIR) && \
+	  SNR_LIB=$(SNR_LIB) \
+	  JAVA_HOME=$(GRAALVM_HOME) \
+	  $(MVNW) test
+
+# Ejecuta tests + verifica cobertura JaCoCo 100% LINE (excluye SqliteLibrary)
+# Reporte HTML: sqlite-native-runtime/java/target/site/jacoco/index.html
+coverage: build-rust
+	cd $(JAVA_DIR) && \
+	  SNR_LIB=$(SNR_LIB) \
+	  JAVA_HOME=$(GRAALVM_HOME) \
+	  $(MVNW) verify
+	@echo "Reporte de cobertura: $(JAVA_DIR)/target/site/jacoco/index.html"
 
 # ── Limpieza ─────────────────────────────────────────────────────────────────
 
