@@ -1,8 +1,8 @@
 # PLAN — sqlite-native-runtime · Revisión de seguridad y hardening
 
 **Última actualización:** 2026-05-21
-**Estado general:** Todos los hallazgos de seguridad corregidos. Pendiente: tareas de build/CI.
-**Commit base:** `7b25047` · **Commit hotfixes CRÍTICO/ALTO:** `c7989d6` · **Commit MEDIO/INFO:** `411a66f`
+**Estado general:** Todos los hallazgos de seguridad corregidos. Deuda técnica menor parcialmente resuelta.
+**Commit base:** `7b25047` · **Commit hotfixes CRÍTICO/ALTO:** `c7989d6` · **Commit MEDIO/INFO:** `411a66f` · **Commit deuda técnica:** `TBD`
 
 ---
 
@@ -349,14 +349,14 @@ Comentario de "solo para desarrollo" añadido al bloque de candidatos relativos.
 
 ## Deuda técnica menor
 
-| ID | Archivo | Descripción | Prioridad |
-|----|---------|-------------|-----------|
-| DT-1 | `rust/src/util.rs` | `cstr_to_string()` sin usar — warning del compilador | Baja |
-| DT-2 | `rust/src/` | No se ejecutó `cargo clippy` tras los fixes | Media |
-| DT-3 | `Makefile` | No hay target `cross` para compilar Linux aarch64/amd64 | Media |
-| DT-4 | `java/` | `mvn package` genera JAR pero no hay `mvn install` automático | Baja |
-| DT-5 | CI | No hay pipeline GitHub Actions para ejecutar smoke test en PR | Alta |
-| DT-6 | `java/pom.xml` | Target actualizado a Java 22 (FFM finalizó en JEP 454). Documentar en README | Baja |
+| ID | Archivo | Descripción | Prioridad | Estado |
+|----|---------|-------------|-----------|--------|
+| DT-1 | `rust/src/util.rs` | `cstr_to_string()` sin usar — eliminada | Baja | ✅ |
+| DT-2 | `rust/src/` | `cargo check` limpio — 0 warnings tras eliminar DT-1 | Media | ✅ |
+| DT-3 | `Makefile` | No hay target `cross` para compilar Linux aarch64/amd64 | Media | ⏳ |
+| DT-4 | `java/` | `mvn package` genera JAR pero no hay `mvn install` automático | Baja | ⏳ |
+| DT-5 | CI | No hay pipeline GitHub Actions para ejecutar smoke test en PR | Alta | ⏳ |
+| DT-6 | `README.md` | Actualizado a Java 22 + JEP 454 + `snr_last_error_copy` en tabla ABI | Baja | ✅ |
 
 ---
 
@@ -375,7 +375,7 @@ Comentario de "solo para desarrollo" añadido al bloque de candidatos relativos.
 - **Fecha:** 2026-05-21
 - **Estado:** `accepted`
 - **Contexto:** JNI requiere reflection y extracción de `.so` a `/tmp`, incompatible con GraalVM Native Image sin configuración extensiva.
-- **Decisión:** Panama FFI estable (Java 21). Flag `--enable-native-access=ALL-UNNAMED` en runtime.
+- **Decisión:** Panama FFI estable (Java 22, JEP 454). Flag `--enable-native-access=ALL-UNNAMED` en runtime.
 - **Consecuencias:** GraalVM solo necesita `--initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary`.
 
 ### DEC-0003 — `sqlite3_close` no `sqlite3_close_v2`
@@ -432,4 +432,4 @@ Comentario de "solo para desarrollo" añadido al bloque de candidatos relativos.
 - [rust/src/error.rs](rust/src/error.rs) — thread-local LAST_ERROR
 - [java/src/main/java/mx/rafex/sqlite/SqliteLibrary.java](java/src/main/java/mx/rafex/sqlite/SqliteLibrary.java) — bindings Panama FFI
 - [java/src/main/java/mx/rafex/sqlite/SqliteStatement.java](java/src/main/java/mx/rafex/sqlite/SqliteStatement.java) — wrapper alto nivel
-- [README.md](README.md) — ABI exportada completa (47 símbolos `snr_*`)
+- [README.md](README.md) — ABI exportada completa (48 símbolos `snr_*`)

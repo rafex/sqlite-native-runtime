@@ -1,8 +1,8 @@
 # sqlite-native-runtime
 
-Biblioteca SQLite genérica para Java 21 + GraalVM Native Image.  
+Biblioteca SQLite genérica para Java 22 + GraalVM Native Image.  
 **Rust** expone la C ABI completa de SQLite vía `libsqlite3-sys`.  
-**Java** la consume con Panama FFI (`java.lang.foreign.*`) — sin JNI, sin extracción de JARs.
+**Java** la consume con Panama FFI (`java.lang.foreign.*`, JEP 454 — estable desde Java 22) — sin JNI, sin extracción de JARs.
 
 ## Arquitectura
 
@@ -19,7 +19,7 @@ Java (Panama FFI)
 
 ```
 rust/          Crate Rust — C ABI (cdylib + staticlib)
-java/          Biblioteca Java Maven (Java 21, Panama FFI)
+java/          Biblioteca Java Maven (Java 22, Panama FFI)
   src/main/java/mx/rafex/sqlite/
     SqliteLibrary.java    — bindings de bajo nivel (MethodHandle por símbolo snr_*)
     SqliteConnection.java — conexión de alto nivel (AutoCloseable)
@@ -32,7 +32,7 @@ java/          Biblioteca Java Maven (Java 21, Panama FFI)
 ### Requisitos
 
 - Rust stable (aarch64-apple-darwin o x86_64-unknown-linux-gnu)
-- Java 21+
+- Java 22+ (Panama FFM API estable desde JEP 454 — preview en Java 21)
 - Maven 3.9+
 
 ```bash
@@ -137,4 +137,4 @@ try (var q = db.prepare("SELECT * FROM items WHERE name = :n")) {
 | Transacciones   | `snr_begin/begin_immediate/begin_exclusive/commit/rollback`                             |
 | Savepoints      | `snr_savepoint/release/rollback_to`                                                    |
 | WAL             | `snr_wal_checkpoint`, `snr_wal_autocheckpoint`                                         |
-| Errores         | `snr_last_error` (puntero interno), `snr_free_string` (libera char*)                  |
+| Errores         | `snr_last_error` (puntero interno, no usar con Loom), `snr_last_error_copy` (copia heap, segura con virtual threads), `snr_free_string` (libera char*) |
