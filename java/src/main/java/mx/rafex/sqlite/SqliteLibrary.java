@@ -26,6 +26,8 @@ import java.util.List;
  *   --enable-native-access=ALL-UNNAMED
  * </pre>
  *
+ * <p>Requiere Java 22+ (FFM API estable desde JEP 454 — Java 22).</p>
+ *
  * <h2>Gestión de memoria</h2>
  * <ul>
  *   <li>Funciones que devuelven {@code MemorySegment} (char*) transfieren propiedad —
@@ -57,8 +59,9 @@ public final class SqliteLibrary {
     // ── MethodHandles ─────────────────────────────────────────────────────────
 
     // Error / memoria
-    private static final MethodHandle MH_LAST_ERROR   = find("snr_last_error",   FunctionDescriptor.of(C_PTR));
-    private static final MethodHandle MH_FREE_STRING  = find("snr_free_string",  FunctionDescriptor.ofVoid(C_PTR));
+    private static final MethodHandle MH_LAST_ERROR      = find("snr_last_error",      FunctionDescriptor.of(C_PTR));
+    private static final MethodHandle MH_LAST_ERROR_COPY = find("snr_last_error_copy", FunctionDescriptor.of(C_PTR));
+    private static final MethodHandle MH_FREE_STRING     = find("snr_free_string",     FunctionDescriptor.ofVoid(C_PTR));
 
     // Conexión
     private static final MethodHandle MH_OPEN         = find("snr_open",         FunctionDescriptor.of(C_PTR, C_PTR, C_INT));
@@ -117,10 +120,31 @@ public final class SqliteLibrary {
 
     // ── API pública ───────────────────────────────────────────────────────────
 
-    /** Puntero interno del hilo al último error. NO liberar. */
+    /**
+     * Puntero interno del hilo al último error. <strong>NO liberar.</strong>
+     *
+     * <p><strong>Advertencia con Project Loom (virtual threads):</strong>
+     * el puntero es válido solo hasta la siguiente llamada {@code snr_*} en el mismo
+     * carrier thread OS. Si dos virtual threads comparten carrier, el error puede
+     * sobreescribirse antes de ser leído. Usar {@link #snr_last_error_copy()} en
+     * entornos con virtual threads.
+     */
     public static MemorySegment snr_last_error() {
         try { return (MemorySegment) MH_LAST_ERROR.invokeExact(); }
         catch (Throwable t) { throw new SqliteException("snr_last_error falló", t); }
+    }
+
+    /**
+     * Devuelve una <em>copia</em> en heap del último error del hilo.
+     * Java <strong>DEBE</strong> liberar el resultado con {@link #snr_free_string} cuando termine.
+     * Devuelve {@link MemorySegment#NULL} si no hay error.
+     *
+     * <p>Seguro con Project Loom: la copia se toma en el instante de la llamada,
+     * evitando carreras con otras virtual threads en el mismo carrier OS.
+     */
+    public static MemorySegment snr_last_error_copy() {
+        try { return (MemorySegment) MH_LAST_ERROR_COPY.invokeExact(); }
+        catch (Throwable t) { throw new SqliteException("snr_last_error_copy falló", t); }
     }
 
     /** Libera un *mut c_char transferido por Rust. Llamar exactamente una vez. */
@@ -475,7 +499,10 @@ public final class SqliteLibrary {
         // Linux
         candidates.add(Path.of("/usr/local/lib/libsqlite_native_runtime.so"));
         candidates.add(Path.of("/opt/snr/lib/libsqlite_native_runtime.so"));
-        // Directorio de trabajo (dev)
+        // Directorio de trabajo — solo para desarrollo local (I-1).
+        // En producción define snr.lib o SNR_LIB con una ruta absoluta;
+        // confiar en CWD permite plantar una .so/dylib maliciosa si el directorio
+        // es escribible por un proceso no confiable.
         candidates.add(Path.of("libsqlite_native_runtime.dylib"));
         candidates.add(Path.of("libsqlite_native_runtime.so"));
         candidates.add(Path.of("lib/libsqlite_native_runtime.dylib"));
@@ -488,6 +515,10 @@ public final class SqliteLibrary {
                 if (!Files.exists(abs) || !Files.isRegularFile(abs)) {
                     tried.append("  ").append(abs).append(" (no existe)\n");
                     continue;
+                }
+                if (!candidate.isAbsolute()) {
+                    System.err.println("[snr] AVISO: cargando desde CWD: " + abs
+                        + " — en producción define snr.lib o SNR_LIB con ruta absoluta.");
                 }
                 return SymbolLookup.libraryLookup(abs, Arena.global());
             } catch (Throwable t) {

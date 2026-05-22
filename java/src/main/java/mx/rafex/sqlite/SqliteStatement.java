@@ -206,11 +206,17 @@ public final class SqliteStatement implements AutoCloseable {
      *
      * <p>Lee desde el puntero interno de SQLite (sin asignación extra en heap Rust).
      * El puntero es válido hasta el siguiente {@link #step()}, {@link #reset()} o {@link #close()}.
+     *
+     * <p>El segmento se acota al tamaño exacto reportado por {@code snr_column_bytes}
+     * para que Panama FFI detecte accesos fuera de bounds (TASK-0002/M-2).
      */
     public String columnText(int col) {
         checkOpen();
         var ptr = SqliteLibrary.snr_column_text(stmt, col);
-        return readInternalString(ptr);
+        if (ptr == null || MemorySegment.NULL.equals(ptr)) return null;
+        int byteLen = SqliteLibrary.snr_column_bytes(stmt, col);
+        if (byteLen <= 0) return "";
+        return ptr.reinterpret(byteLen + 1L).getString(0, StandardCharsets.UTF_8);
     }
 
     /**
@@ -277,18 +283,28 @@ public final class SqliteStatement implements AutoCloseable {
         if (closed) throw new SqliteException("Statement ya cerrado");
     }
 
+    /**
+     * Lee el último error del hilo como String.
+     * Usa snr_last_error_copy para evitar carreras con Project Loom (TASK-0001/M-1):
+     * la copia se toma atómicamente y se libera tras la lectura.
+     */
     static String lastError() {
-        return readInternalString(SqliteLibrary.snr_last_error());
+        return readAndFreeString(SqliteLibrary.snr_last_error_copy());
     }
 
-    /** Lee un string desde un puntero interno (no libera). Devuelve null si es NULL. */
+    /**
+     * Lee un string null-terminado desde un puntero interno de SQLite o Rust.
+     * No libera el puntero — llamar solo con punteros cuyo ciclo de vida
+     * está gestionado por SQLite o por el thread-local de Rust.
+     * Devuelve null si el puntero es NULL.
+     *
+     * <p>Panama FFI devuelve segmentos con byteSize=0 para punteros C; se requiere
+     * reinterpret para que getString pueda escanear hasta el null-terminador.
+     * Para columnas TEXT usar {@link #columnText(int)} que usa el bound exacto.
+     */
     static String readInternalString(MemorySegment ptr) {
         if (ptr == null || MemorySegment.NULL.equals(ptr)) return null;
-        var unbound = ptr.reinterpret(Integer.MAX_VALUE);
-        long len = 0;
-        while (unbound.get(ValueLayout.JAVA_BYTE, len) != 0) len++;
-        if (len == 0) return "";
-        return new String(unbound.asSlice(0, len).toArray(ValueLayout.JAVA_BYTE), StandardCharsets.UTF_8);
+        return ptr.reinterpret(Long.MAX_VALUE).getString(0, StandardCharsets.UTF_8);
     }
 
     /** Lee un string desde un puntero transferido (llama snr_free_string). Devuelve null si es NULL. */
