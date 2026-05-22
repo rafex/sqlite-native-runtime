@@ -22,7 +22,8 @@ GLIBC_MIN := 2.17
 
 .PHONY: all build-rust build-java build test smoke native \
         cross-linux-amd64 cross-linux-arm64 cross \
-        install package test-unit coverage clean
+        install package test-unit coverage \
+        test-rust coverage-rust clean
 
 all: build
 
@@ -90,6 +91,20 @@ native: build
 	@echo "Ejecutar con: SNR_LIB=$(SNR_LIB) $(JAVA_DIR)/target/snr-smoke"
 
 # ── Tests unitarios y cobertura ──────────────────────────────────────────────
+
+# Ejecuta los tests unitarios Rust (#[cfg(test)]) con cargo test --lib
+test-rust:
+	cd $(RUST_DIR) && \
+	  PATH="$(HOME)/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$$PATH" \
+	  RUSTC=$(RUSTC) $(CARGO) test --lib
+
+# Cobertura Rust con cargo-llvm-cov (requiere: cargo install cargo-llvm-cov)
+# Reporte HTML: sqlite-native-runtime/rust/target/llvm-cov/html/index.html
+coverage-rust:
+	cd $(RUST_DIR) && \
+	  PATH="$(HOME)/.rustup/toolchains/stable-aarch64-apple-darwin/bin:$$PATH" \
+	  RUSTC=$(RUSTC) $(CARGO) llvm-cov --lib --html
+	@echo "Reporte de cobertura Rust: $(RUST_DIR)/target/llvm-cov/html/index.html"
 
 # Ejecuta los tests unitarios JUnit 5 (requiere la .dylib compilada)
 test-unit: build-rust

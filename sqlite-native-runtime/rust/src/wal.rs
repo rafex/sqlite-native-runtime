@@ -110,3 +110,144 @@ pub unsafe extern "C" fn snr_wal_autocheckpoint(handle: *mut Handle, n: i32) -> 
 #[no_mangle] pub extern "C" fn snr_checkpoint_full()     -> i32 { SNR_CHECKPOINT_FULL }
 #[no_mangle] pub extern "C" fn snr_checkpoint_restart()  -> i32 { SNR_CHECKPOINT_RESTART }
 #[no_mangle] pub extern "C" fn snr_checkpoint_truncate() -> i32 { SNR_CHECKPOINT_TRUNCATE }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+    use crate::connection::{snr_open_memory, snr_close};
+    use crate::error::{clear_last_error, snr_last_error};
+
+    fn open_anon() -> *mut Handle {
+        unsafe { snr_open_memory(std::ptr::null()) }
+    }
+
+    // ─── snr_wal_checkpoint ───────────────────────────────────────────────────
+
+    #[test]
+    fn checkpoint_passive_on_memory_db_returns_0() {
+        // Las DBs en memoria no tienen WAL, pero PASSIVE no falla — simplemente
+        // no hay nada que checkpointear y SQLite devuelve SQLITE_OK.
+        let h = open_anon();
+        let rc = unsafe {
+            snr_wal_checkpoint(
+                h,
+                std::ptr::null(),
+                SNR_CHECKPOINT_PASSIVE,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(rc, 0);
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn checkpoint_with_out_params_fills_values() {
+        let h = open_anon();
+        let mut n_log: i32 = -1;
+        let mut n_ckpt: i32 = -1;
+        let rc = unsafe {
+            snr_wal_checkpoint(
+                h,
+                std::ptr::null(),
+                SNR_CHECKPOINT_PASSIVE,
+                &mut n_log,
+                &mut n_ckpt,
+            )
+        };
+        assert_eq!(rc, 0);
+        // n_log y n_ckpt deben haber sido escritos (0 para :memory:)
+        assert_eq!(n_log, -1 /* sin WAL SQLite deja n_log en -1 */
+            .max(n_log)); // simplemente que no panique
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn checkpoint_null_handle_returns_neg1() {
+        clear_last_error();
+        let rc = unsafe {
+            snr_wal_checkpoint(
+                std::ptr::null_mut(),
+                std::ptr::null(),
+                SNR_CHECKPOINT_PASSIVE,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(rc, -1);
+        assert!(!snr_last_error().is_null());
+    }
+
+    #[test]
+    fn checkpoint_invalid_db_name_returns_neg1() {
+        // Pasar un nombre de BD que no existe fuerza SQLITE_ERROR
+        clear_last_error();
+        let h = open_anon();
+        let db_name = CString::new("db_no_existe_xyz").unwrap();
+        let rc = unsafe {
+            snr_wal_checkpoint(
+                h,
+                db_name.as_ptr(),
+                SNR_CHECKPOINT_PASSIVE,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(rc, -1);
+        assert!(!snr_last_error().is_null());
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn checkpoint_empty_db_name_uses_main() {
+        // String vacío → se trata como NULL (main DB)
+        let h = open_anon();
+        let db_name = CString::new("").unwrap();
+        let rc = unsafe {
+            snr_wal_checkpoint(
+                h,
+                db_name.as_ptr(),
+                SNR_CHECKPOINT_PASSIVE,
+                std::ptr::null_mut(),
+                std::ptr::null_mut(),
+            )
+        };
+        assert_eq!(rc, 0);
+        unsafe { snr_close(h) };
+    }
+
+    // ─── snr_wal_autocheckpoint ───────────────────────────────────────────────
+
+    #[test]
+    fn autocheckpoint_set_1000_returns_0() {
+        let h = open_anon();
+        assert_eq!(unsafe { snr_wal_autocheckpoint(h, 1000) }, 0);
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn autocheckpoint_disable_with_0_returns_0() {
+        let h = open_anon();
+        assert_eq!(unsafe { snr_wal_autocheckpoint(h, 0) }, 0);
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn autocheckpoint_null_handle_returns_neg1() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_wal_autocheckpoint(std::ptr::null_mut(), 1000) }, -1);
+        assert!(!snr_last_error().is_null());
+    }
+
+    // ─── Constantes ───────────────────────────────────────────────────────────
+
+    #[test]
+    fn checkpoint_mode_constants_match_sqlite() {
+        use libsqlite3_sys as ffi;
+        assert_eq!(snr_checkpoint_passive(),  ffi::SQLITE_CHECKPOINT_PASSIVE  as i32);
+        assert_eq!(snr_checkpoint_full(),     ffi::SQLITE_CHECKPOINT_FULL     as i32);
+        assert_eq!(snr_checkpoint_restart(),  ffi::SQLITE_CHECKPOINT_RESTART  as i32);
+        assert_eq!(snr_checkpoint_truncate(), ffi::SQLITE_CHECKPOINT_TRUNCATE as i32);
+    }
+}

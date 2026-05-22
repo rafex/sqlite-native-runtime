@@ -141,3 +141,204 @@ unsafe fn exec_with_name(
     let sql = format!("{command} \"{safe_name}\"\0");
     exec_simple(handle, sql.as_bytes(), caller)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+    use crate::connection::{snr_open_memory, snr_close};
+    use crate::error::{clear_last_error, snr_last_error};
+
+    fn open_anon() -> *mut Handle {
+        unsafe { snr_open_memory(std::ptr::null()) }
+    }
+
+    // ─── snr_begin / snr_commit ───────────────────────────────────────────────
+
+    #[test]
+    fn begin_and_commit_returns_0() {
+        let h = open_anon();
+        assert_eq!(unsafe { snr_begin(h) }, 0);
+        assert_eq!(unsafe { snr_commit(h) }, 0);
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn begin_immediate_and_commit_returns_0() {
+        let h = open_anon();
+        assert_eq!(unsafe { snr_begin_immediate(h) }, 0);
+        assert_eq!(unsafe { snr_commit(h) }, 0);
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn begin_exclusive_and_commit_returns_0() {
+        let h = open_anon();
+        assert_eq!(unsafe { snr_begin_exclusive(h) }, 0);
+        assert_eq!(unsafe { snr_commit(h) }, 0);
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn begin_and_rollback_returns_0() {
+        let h = open_anon();
+        assert_eq!(unsafe { snr_begin(h) }, 0);
+        assert_eq!(unsafe { snr_rollback(h) }, 0);
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn begin_null_handle_returns_neg1() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_begin(std::ptr::null_mut()) }, -1);
+        assert!(!snr_last_error().is_null());
+    }
+
+    #[test]
+    fn begin_immediate_null_handle_returns_neg1() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_begin_immediate(std::ptr::null_mut()) }, -1);
+    }
+
+    #[test]
+    fn begin_exclusive_null_handle_returns_neg1() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_begin_exclusive(std::ptr::null_mut()) }, -1);
+    }
+
+    #[test]
+    fn commit_null_handle_returns_neg1() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_commit(std::ptr::null_mut()) }, -1);
+    }
+
+    #[test]
+    fn rollback_null_handle_returns_neg1() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_rollback(std::ptr::null_mut()) }, -1);
+    }
+
+    #[test]
+    fn double_begin_returns_neg1() {
+        // SQLite rechaza BEGIN dentro de una transacción activa
+        clear_last_error();
+        let h = open_anon();
+        assert_eq!(unsafe { snr_begin(h) }, 0);
+        assert_eq!(unsafe { snr_begin(h) }, -1);
+        let err = snr_last_error();
+        assert!(!err.is_null());
+        unsafe { snr_rollback(h) };
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn commit_without_transaction_returns_neg1() {
+        clear_last_error();
+        let h = open_anon();
+        // No hay transacción activa
+        let rc = unsafe { snr_commit(h) };
+        assert_eq!(rc, -1);
+        assert!(!snr_last_error().is_null());
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn rollback_without_transaction_returns_neg1() {
+        clear_last_error();
+        let h = open_anon();
+        let rc = unsafe { snr_rollback(h) };
+        assert_eq!(rc, -1);
+        assert!(!snr_last_error().is_null());
+        unsafe { snr_close(h) };
+    }
+
+    // ─── snr_savepoint / snr_release / snr_rollback_to ───────────────────────
+
+    #[test]
+    fn savepoint_and_release_returns_0() {
+        let h = open_anon();
+        let name = CString::new("sp1").unwrap();
+        assert_eq!(unsafe { snr_savepoint(h, name.as_ptr()) }, 0);
+        assert_eq!(unsafe { snr_release(h, name.as_ptr()) }, 0);
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn savepoint_and_rollback_to_returns_0() {
+        let h = open_anon();
+        let name = CString::new("sp2").unwrap();
+        assert_eq!(unsafe { snr_savepoint(h, name.as_ptr()) }, 0);
+        assert_eq!(unsafe { snr_rollback_to(h, name.as_ptr()) }, 0);
+        // Después de ROLLBACK TO el savepoint sigue activo, hay que liberarlo
+        assert_eq!(unsafe { snr_release(h, name.as_ptr()) }, 0);
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn savepoint_name_with_double_quotes_escapes_correctly() {
+        // El nombre contiene " — debe escaparse como "" (SQL identifier)
+        let h = open_anon();
+        let name = CString::new("sp\"injection").unwrap();
+        // La función debe manejar el nombre sin error (escaping correcto)
+        let rc = unsafe { snr_savepoint(h, name.as_ptr()) };
+        assert_eq!(rc, 0);
+        // Release también debe funcionar con el mismo nombre escapado
+        assert_eq!(unsafe { snr_release(h, name.as_ptr()) }, 0);
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn savepoint_null_name_returns_neg1() {
+        clear_last_error();
+        let h = open_anon();
+        assert_eq!(unsafe { snr_savepoint(h, std::ptr::null()) }, -1);
+        assert!(!snr_last_error().is_null());
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn release_null_name_returns_neg1() {
+        clear_last_error();
+        let h = open_anon();
+        assert_eq!(unsafe { snr_release(h, std::ptr::null()) }, -1);
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn rollback_to_null_name_returns_neg1() {
+        clear_last_error();
+        let h = open_anon();
+        assert_eq!(unsafe { snr_rollback_to(h, std::ptr::null()) }, -1);
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn savepoint_null_handle_returns_neg1() {
+        clear_last_error();
+        let name = CString::new("sp").unwrap();
+        assert_eq!(unsafe { snr_savepoint(std::ptr::null_mut(), name.as_ptr()) }, -1);
+    }
+
+    #[test]
+    fn release_nonexistent_savepoint_returns_neg1() {
+        clear_last_error();
+        let h = open_anon();
+        let name = CString::new("no_existe_sp").unwrap();
+        let rc = unsafe { snr_release(h, name.as_ptr()) };
+        assert_eq!(rc, -1);
+        assert!(!snr_last_error().is_null());
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn nested_savepoints_work() {
+        let h = open_anon();
+        let sp1 = CString::new("outer").unwrap();
+        let sp2 = CString::new("inner").unwrap();
+        assert_eq!(unsafe { snr_savepoint(h, sp1.as_ptr()) }, 0);
+        assert_eq!(unsafe { snr_savepoint(h, sp2.as_ptr()) }, 0);
+        assert_eq!(unsafe { snr_release(h, sp2.as_ptr()) }, 0);
+        assert_eq!(unsafe { snr_release(h, sp1.as_ptr()) }, 0);
+        unsafe { snr_close(h) };
+    }
+}

@@ -67,3 +67,45 @@ impl Handle {
 pub(crate) unsafe fn handle_ref<'a>(ptr: *mut Handle) -> Option<&'a Handle> {
     if ptr.is_null() { None } else { Some(&*ptr) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::connection::snr_open_memory;
+    use crate::connection::snr_close;
+
+    #[test]
+    fn null_handle_ref_returns_none() {
+        let result = unsafe { handle_ref(std::ptr::null_mut()) };
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn valid_handle_ref_returns_some() {
+        let h = unsafe { snr_open_memory(std::ptr::null()) };
+        assert!(!h.is_null());
+        let r = unsafe { handle_ref(h) };
+        assert!(r.is_some());
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn raw_conn_drop_closes_sqlite() {
+        // Crear y cerrar un handle: Drop de RawConn llama sqlite3_close sin panicar
+        let h = unsafe { snr_open_memory(std::ptr::null()) };
+        assert!(!h.is_null());
+        unsafe { snr_close(h) };
+        // Si llegamos aquí sin panicar, Drop funcionó correctamente
+    }
+
+    #[test]
+    fn handle_inner_arc_is_shared() {
+        let h = unsafe { snr_open_memory(std::ptr::null()) };
+        assert!(!h.is_null());
+        let handle_ref_opt = unsafe { handle_ref(h) };
+        let handle = handle_ref_opt.unwrap();
+        // Arc::strong_count == 1 (solo el Handle, sin statements)
+        assert_eq!(Arc::strong_count(&handle.inner), 1);
+        unsafe { snr_close(h) };
+    }
+}

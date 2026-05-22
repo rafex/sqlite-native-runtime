@@ -498,3 +498,572 @@ unsafe fn set_error_from_stmt(sh: &StmtHandle) {
         set_last_error(msg);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CString;
+    use crate::connection::{snr_open_memory, snr_close, snr_exec};
+    use crate::error::{clear_last_error, snr_last_error};
+
+    // ─── Helper: conexión en memoria + prepare ────────────────────────────────
+
+    unsafe fn open_anon() -> *mut Handle {
+        snr_open_memory(std::ptr::null())
+    }
+
+    unsafe fn prepare(h: *mut Handle, sql: &str) -> *mut StmtHandle {
+        let cs = CString::new(sql).unwrap();
+        snr_prepare(h, cs.as_ptr())
+    }
+
+    // ─── snr_prepare ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn prepare_valid_sql_returns_nonnull() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT 1") };
+        assert!(!s.is_null());
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn prepare_invalid_sql_returns_null() {
+        clear_last_error();
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "NOT SQL") };
+        assert!(s.is_null());
+        assert!(!snr_last_error().is_null());
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn prepare_null_handle_returns_null() {
+        clear_last_error();
+        let cs = CString::new("SELECT 1").unwrap();
+        let s = unsafe { snr_prepare(std::ptr::null_mut(), cs.as_ptr()) };
+        assert!(s.is_null());
+    }
+
+    #[test]
+    fn prepare_null_sql_returns_null() {
+        clear_last_error();
+        let h = unsafe { open_anon() };
+        let s = unsafe { snr_prepare(h, std::ptr::null()) };
+        assert!(s.is_null());
+        unsafe { snr_close(h) };
+    }
+
+    // ─── snr_stmt_close ───────────────────────────────────────────────────────
+
+    #[test]
+    fn stmt_close_null_is_noop() {
+        unsafe { snr_stmt_close(std::ptr::null_mut()) };
+    }
+
+    // ─── snr_step ─────────────────────────────────────────────────────────────
+
+    #[test]
+    fn step_select_returns_row_then_done() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT 1") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_step(s) }, SNR_DONE);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn step_null_stmt_returns_error() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_step(std::ptr::null_mut()) }, SNR_ERROR);
+        assert!(!snr_last_error().is_null());
+    }
+
+    #[test]
+    fn step_insert_returns_done() {
+        let h = unsafe { open_anon() };
+        let ddl = CString::new("CREATE TABLE t(x INTEGER)").unwrap();
+        unsafe { snr_exec(h, ddl.as_ptr()) };
+        let s = unsafe { prepare(h, "INSERT INTO t VALUES(99)") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_DONE);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    // ─── snr_stmt_reset ───────────────────────────────────────────────────────
+
+    #[test]
+    fn reset_allows_re_execute() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT 1") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_stmt_reset(s) }, 0);
+        // Después de reset se puede re-ejecutar
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn reset_null_stmt_returns_neg1() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_stmt_reset(std::ptr::null_mut()) }, -1);
+    }
+
+    // ─── snr_stmt_clear_bindings ──────────────────────────────────────────────
+
+    #[test]
+    fn clear_bindings_returns_0() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        let cs = CString::new("valor").unwrap();
+        unsafe { snr_bind_text(s, 1, cs.as_ptr()) };
+        assert_eq!(unsafe { snr_stmt_clear_bindings(s) }, 0);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn clear_bindings_null_stmt_returns_neg1() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_stmt_clear_bindings(std::ptr::null_mut()) }, -1);
+    }
+
+    // ─── snr_bind_null ────────────────────────────────────────────────────────
+
+    #[test]
+    fn bind_null_idx1_returns_0() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        assert_eq!(unsafe { snr_bind_null(s, 1) }, 0);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_null_out_of_range_returns_neg1() {
+        clear_last_error();
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        // idx=999 fuera de rango → SQLITE_RANGE
+        assert_eq!(unsafe { snr_bind_null(s, 999) }, -1);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_null_null_stmt_returns_neg1() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_bind_null(std::ptr::null_mut(), 1) }, -1);
+    }
+
+    // ─── snr_bind_int ─────────────────────────────────────────────────────────
+
+    #[test]
+    fn bind_int_returns_0_and_readable() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        assert_eq!(unsafe { snr_bind_int(s, 1, 42) }, 0);
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_column_int(s, 0) }, 42);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_int_out_of_range_returns_neg1() {
+        clear_last_error();
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        assert_eq!(unsafe { snr_bind_int(s, 999, 1) }, -1);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_int_null_stmt_returns_neg1() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_bind_int(std::ptr::null_mut(), 1, 0) }, -1);
+    }
+
+    #[test]
+    fn bind_int_max_i64() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        assert_eq!(unsafe { snr_bind_int(s, 1, i64::MAX) }, 0);
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_column_int(s, 0) }, i64::MAX);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    // ─── snr_bind_double ──────────────────────────────────────────────────────
+
+    #[test]
+    fn bind_double_returns_0_and_readable() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        assert_eq!(unsafe { snr_bind_double(s, 1, 3.14) }, 0);
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        let v = unsafe { snr_column_double(s, 0) };
+        assert!((v - 3.14).abs() < 1e-10);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_double_out_of_range_returns_neg1() {
+        clear_last_error();
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        assert_eq!(unsafe { snr_bind_double(s, 999, 1.0) }, -1);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_double_null_stmt_returns_neg1() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_bind_double(std::ptr::null_mut(), 1, 0.0) }, -1);
+    }
+
+    // ─── snr_bind_text ────────────────────────────────────────────────────────
+
+    #[test]
+    fn bind_text_returns_0_and_readable() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        let val = CString::new("hola").unwrap();
+        assert_eq!(unsafe { snr_bind_text(s, 1, val.as_ptr()) }, 0);
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_column_type(s, 0) }, SNR_TYPE_TEXT);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_text_null_val_binds_null() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        // null val → bind_null internamente
+        assert_eq!(unsafe { snr_bind_text(s, 1, std::ptr::null()) }, 0);
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_column_type(s, 0) }, SNR_TYPE_NULL);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_text_out_of_range_returns_neg1() {
+        clear_last_error();
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        let val = CString::new("x").unwrap();
+        assert_eq!(unsafe { snr_bind_text(s, 999, val.as_ptr()) }, -1);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_text_null_stmt_returns_neg1() {
+        clear_last_error();
+        let val = CString::new("x").unwrap();
+        assert_eq!(unsafe { snr_bind_text(std::ptr::null_mut(), 1, val.as_ptr()) }, -1);
+    }
+
+    // ─── snr_bind_blob ────────────────────────────────────────────────────────
+
+    #[test]
+    fn bind_blob_returns_0_and_readable() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        let data: &[u8] = &[1, 2, 3, 4];
+        assert_eq!(unsafe { snr_bind_blob(s, 1, data.as_ptr(), data.len() as i32) }, 0);
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_column_type(s, 0) }, SNR_TYPE_BLOB);
+        assert_eq!(unsafe { snr_column_bytes(s, 0) }, 4);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_blob_null_data_binds_null() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        assert_eq!(unsafe { snr_bind_blob(s, 1, std::ptr::null(), 0) }, 0);
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_column_type(s, 0) }, SNR_TYPE_NULL);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_blob_negative_len_returns_neg1() {
+        clear_last_error();
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        let data: &[u8] = &[0x00];
+        assert_eq!(unsafe { snr_bind_blob(s, 1, data.as_ptr(), -1) }, -1);
+        let err = snr_last_error();
+        assert!(!err.is_null());
+        let msg = unsafe { CStr::from_ptr(err).to_str().unwrap() };
+        assert!(msg.contains("negativo"), "error esperado: {msg}");
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_blob_out_of_range_returns_neg1() {
+        clear_last_error();
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        let data: &[u8] = &[1];
+        assert_eq!(unsafe { snr_bind_blob(s, 999, data.as_ptr(), 1) }, -1);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_blob_null_stmt_returns_neg1() {
+        clear_last_error();
+        let data: &[u8] = &[1];
+        assert_eq!(unsafe { snr_bind_blob(std::ptr::null_mut(), 1, data.as_ptr(), 1) }, -1);
+    }
+
+    #[test]
+    fn bind_blob_zero_length_ok() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        let data: &[u8] = &[];
+        // len=0 es válido (blob vacío)
+        assert_eq!(unsafe { snr_bind_blob(s, 1, data.as_ptr(), 0) }, 0);
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        // SQLite devuelve SQLITE_BLOB con 0 bytes (o NULL a nivel de puntero)
+        assert_eq!(unsafe { snr_column_bytes(s, 0) }, 0);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    // ─── snr_bind_parameter_index ─────────────────────────────────────────────
+
+    #[test]
+    fn bind_parameter_index_found() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT :val") };
+        let name = CString::new(":val").unwrap();
+        let idx = unsafe { snr_bind_parameter_index(s, name.as_ptr()) };
+        assert_eq!(idx, 1);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_parameter_index_not_found_returns_0() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT :val") };
+        let name = CString::new(":no_existe").unwrap();
+        let idx = unsafe { snr_bind_parameter_index(s, name.as_ptr()) };
+        assert_eq!(idx, 0);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_parameter_index_null_name_returns_0() {
+        clear_last_error();
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT ?") };
+        let idx = unsafe { snr_bind_parameter_index(s, std::ptr::null()) };
+        assert_eq!(idx, 0);
+        assert!(!snr_last_error().is_null());
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn bind_parameter_index_null_stmt_returns_0() {
+        clear_last_error();
+        let name = CString::new(":val").unwrap();
+        let idx = unsafe { snr_bind_parameter_index(std::ptr::null_mut(), name.as_ptr()) };
+        assert_eq!(idx, 0);
+    }
+
+    // ─── Column functions ─────────────────────────────────────────────────────
+
+    #[test]
+    fn column_count_returns_correct_value() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT 1, 2, 3") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_column_count(s) }, 3);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn column_count_null_stmt_returns_0() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_column_count(std::ptr::null_mut()) }, 0);
+    }
+
+    #[test]
+    fn column_type_integer() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT 42") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_column_type(s, 0) }, SNR_TYPE_INTEGER);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn column_type_float() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT 1.5") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_column_type(s, 0) }, SNR_TYPE_FLOAT);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn column_type_text() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT 'texto'") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_column_type(s, 0) }, SNR_TYPE_TEXT);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn column_type_blob() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT X'DEADBEEF'") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_column_type(s, 0) }, SNR_TYPE_BLOB);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn column_type_null() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT NULL") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        assert_eq!(unsafe { snr_column_type(s, 0) }, SNR_TYPE_NULL);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn column_type_null_stmt_returns_null_type() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_column_type(std::ptr::null_mut(), 0) }, SNR_TYPE_NULL);
+    }
+
+    #[test]
+    fn column_int_null_stmt_returns_0() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_column_int(std::ptr::null_mut(), 0) }, 0);
+    }
+
+    #[test]
+    fn column_double_null_stmt_returns_0() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_column_double(std::ptr::null_mut(), 0) }, 0.0);
+    }
+
+    #[test]
+    fn column_text_returns_valid_ptr() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT 'mundo'") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        let ptr = unsafe { snr_column_text(s, 0) };
+        assert!(!ptr.is_null());
+        let txt = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
+        assert_eq!(txt, "mundo");
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn column_text_null_returns_null_ptr() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT NULL") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        let ptr = unsafe { snr_column_text(s, 0) };
+        assert!(ptr.is_null());
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn column_text_null_stmt_returns_null_ptr() {
+        clear_last_error();
+        assert!(unsafe { snr_column_text(std::ptr::null_mut(), 0) }.is_null());
+    }
+
+    #[test]
+    fn column_text_owned_returns_valid_ptr() {
+        use crate::error::snr_free_string;
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT 'owned'") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        let ptr = unsafe { snr_column_text_owned(s, 0) };
+        assert!(!ptr.is_null());
+        let txt = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
+        assert_eq!(txt, "owned");
+        unsafe { snr_free_string(ptr) };
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn column_text_owned_null_returns_null() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT NULL") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        let ptr = unsafe { snr_column_text_owned(s, 0) };
+        assert!(ptr.is_null());
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn column_text_owned_null_stmt_returns_null() {
+        clear_last_error();
+        assert!(unsafe { snr_column_text_owned(std::ptr::null_mut(), 0) }.is_null());
+    }
+
+    #[test]
+    fn column_blob_returns_bytes() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT X'0102030405'") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        let ptr = unsafe { snr_column_blob(s, 0) };
+        assert!(!ptr.is_null());
+        assert_eq!(unsafe { snr_column_bytes(s, 0) }, 5);
+        let bytes = unsafe { std::slice::from_raw_parts(ptr, 5) };
+        assert_eq!(bytes, &[0x01, 0x02, 0x03, 0x04, 0x05]);
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn column_blob_null_stmt_returns_null() {
+        clear_last_error();
+        assert!(unsafe { snr_column_blob(std::ptr::null_mut(), 0) }.is_null());
+    }
+
+    #[test]
+    fn column_bytes_null_stmt_returns_0() {
+        clear_last_error();
+        assert_eq!(unsafe { snr_column_bytes(std::ptr::null_mut(), 0) }, 0);
+    }
+
+    #[test]
+    fn column_name_returns_correct_name() {
+        let h = unsafe { open_anon() };
+        let s = unsafe { prepare(h, "SELECT 1 AS micolumna") };
+        assert_eq!(unsafe { snr_step(s) }, SNR_ROW);
+        let ptr = unsafe { snr_column_name(s, 0) };
+        assert!(!ptr.is_null());
+        let name = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
+        assert_eq!(name, "micolumna");
+        unsafe { snr_stmt_close(s); snr_close(h) };
+    }
+
+    #[test]
+    fn column_name_null_stmt_returns_null() {
+        clear_last_error();
+        assert!(unsafe { snr_column_name(std::ptr::null_mut(), 0) }.is_null());
+    }
+
+    // ─── Constantes SNR_TYPE / SNR_ROW / SNR_DONE / SNR_ERROR ────────────────
+
+    #[test]
+    fn type_constants_match_sqlite() {
+        use libsqlite3_sys as ffi;
+        assert_eq!(SNR_TYPE_INTEGER, ffi::SQLITE_INTEGER);
+        assert_eq!(SNR_TYPE_FLOAT,   ffi::SQLITE_FLOAT);
+        assert_eq!(SNR_TYPE_TEXT,    ffi::SQLITE_TEXT);
+        assert_eq!(SNR_TYPE_BLOB,    ffi::SQLITE_BLOB);
+        assert_eq!(SNR_TYPE_NULL,    ffi::SQLITE_NULL);
+    }
+
+    #[test]
+    fn step_constants_values() {
+        assert_eq!(SNR_ROW,   1);
+        assert_eq!(SNR_DONE,  0);
+        assert_eq!(SNR_ERROR, -1);
+    }
+}

@@ -67,3 +67,120 @@ pub unsafe extern "C" fn snr_free_string(ptr: *mut c_char) {
         let _ = CString::from_raw(ptr);
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::CStr;
+
+    fn clear() {
+        clear_last_error();
+    }
+
+    #[test]
+    fn last_error_initially_null() {
+        clear();
+        let ptr = snr_last_error();
+        assert!(ptr.is_null(), "sin error el puntero debe ser nulo");
+    }
+
+    #[test]
+    fn set_and_read_error() {
+        clear();
+        set_last_error("error de prueba");
+        let ptr = snr_last_error();
+        assert!(!ptr.is_null());
+        let s = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
+        assert_eq!(s, "error de prueba");
+    }
+
+    #[test]
+    fn clear_resets_error() {
+        set_last_error("algo");
+        clear_last_error();
+        let ptr = snr_last_error();
+        assert!(ptr.is_null());
+    }
+
+    #[test]
+    fn last_error_copy_null_when_no_error() {
+        clear();
+        let ptr = snr_last_error_copy();
+        assert!(ptr.is_null());
+    }
+
+    #[test]
+    fn last_error_copy_returns_owned_string() {
+        clear();
+        set_last_error("copia heap");
+        let ptr = snr_last_error_copy();
+        assert!(!ptr.is_null());
+        let s = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
+        assert_eq!(s, "copia heap");
+        // Liberar la copia
+        unsafe { snr_free_string(ptr) };
+    }
+
+    #[test]
+    fn last_error_copy_is_independent() {
+        // La copia debe seguir siendo válida después de clear
+        clear();
+        set_last_error("copia independiente");
+        let ptr = snr_last_error_copy();
+        clear_last_error();
+        // El error interno está limpio pero la copia sigue viva
+        assert!(snr_last_error().is_null());
+        let s = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
+        assert_eq!(s, "copia independiente");
+        unsafe { snr_free_string(ptr) };
+    }
+
+    #[test]
+    fn free_null_is_noop() {
+        // No debe panicar
+        unsafe { snr_free_string(std::ptr::null_mut()) };
+    }
+
+    #[test]
+    fn set_error_with_interior_nul_truncates() {
+        clear();
+        // El mensaje tiene un byte nulo interior: solo "antes" debe quedar
+        set_last_error(b"antes\0despues".to_vec());
+        let ptr = snr_last_error();
+        assert!(!ptr.is_null());
+        let s = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
+        assert_eq!(s, "antes");
+    }
+
+    #[test]
+    fn set_error_empty_string() {
+        clear();
+        set_last_error("");
+        let ptr = snr_last_error();
+        // Un string vacío sigue siendo Some(""), no None
+        assert!(!ptr.is_null());
+        let s = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
+        assert_eq!(s, "");
+    }
+
+    #[test]
+    fn thread_local_isolation() {
+        // El error en el hilo principal no contamina un hilo nuevo
+        set_last_error("error hilo principal");
+        let handle = std::thread::spawn(|| {
+            // En el nuevo hilo no debe haber error (thread_local fresco)
+            snr_last_error().is_null()
+        });
+        assert!(handle.join().unwrap(), "thread_local debe estar vacío en nuevo hilo");
+    }
+
+    #[test]
+    fn set_error_overrides_previous() {
+        clear();
+        set_last_error("primero");
+        set_last_error("segundo");
+        let ptr = snr_last_error();
+        let s = unsafe { CStr::from_ptr(ptr).to_str().unwrap() };
+        assert_eq!(s, "segundo");
+    }
+}

@@ -20,3 +20,44 @@ unsafe impl Send for StmtHandle {}
 pub(crate) unsafe fn stmt_ref<'a>(ptr: *mut StmtHandle) -> Option<&'a StmtHandle> {
     if ptr.is_null() { None } else { Some(&*ptr) }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::connection::{snr_open_memory, snr_close};
+    use crate::statement::{snr_prepare, snr_stmt_close};
+
+    #[test]
+    fn null_stmt_ref_returns_none() {
+        let result = unsafe { stmt_ref(std::ptr::null_mut()) };
+        assert!(result.is_none());
+    }
+
+    #[test]
+    fn valid_stmt_ref_returns_some() {
+        let h = unsafe { snr_open_memory(std::ptr::null()) };
+        assert!(!h.is_null());
+        let sql = b"SELECT 1\0";
+        let s = unsafe { snr_prepare(h, sql.as_ptr() as *const _) };
+        assert!(!s.is_null());
+        let r = unsafe { stmt_ref(s) };
+        assert!(r.is_some());
+        unsafe { snr_stmt_close(s) };
+        unsafe { snr_close(h) };
+    }
+
+    #[test]
+    fn stmt_handle_holds_arc_to_conn() {
+        let h = unsafe { snr_open_memory(std::ptr::null()) };
+        assert!(!h.is_null());
+        let sql = b"SELECT 42\0";
+        let s = unsafe { snr_prepare(h, sql.as_ptr() as *const _) };
+        assert!(!s.is_null());
+        // El StmtHandle tiene un Arc al Mutex de la conexión
+        let sh = unsafe { stmt_ref(s) }.unwrap();
+        // Arc::strong_count >= 2 (Handle + StmtHandle)
+        assert!(Arc::strong_count(&sh.conn) >= 2);
+        unsafe { snr_stmt_close(s) };
+        unsafe { snr_close(h) };
+    }
+}
