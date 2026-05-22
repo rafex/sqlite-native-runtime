@@ -2,7 +2,7 @@
 
 **Última actualización:** 2026-05-21
 **Estado general:** Correcciones de seguridad completas. Revisión arquitectónica completada (R-1..R-9).
-**Commit base:** `7b25047` · **Commit hotfixes CRÍTICO/ALTO:** `c7989d6` · **Commit MEDIO/INFO:** `411a66f` · **Commit deuda técnica:** `730effd` · **Commit revisión arquitectónica:** `TBD`
+**Commit base:** `7b25047` · **Commit hotfixes CRÍTICO/ALTO:** `c7989d6` · **Commit MEDIO/INFO:** `411a66f` · **Commit deuda técnica:** `730effd` · **Commit revisión arquitectónica:** `1e6018c`
 
 ---
 
@@ -32,7 +32,7 @@ La revisión identificó **11 hallazgos** clasificados en cuatro niveles de seve
 | **SEC-INFORMATIVO · Hotfix I-2** | ✅ Completada | 100% | `c7989d6` | 0.5 h |
 | **SEC-MEDIO · M-1, M-2, M-3** | ✅ Completada | 100% | `411a66f` | 2 h |
 | **SEC-INFO · I-1 ruta relativa Java** | ✅ Completada | 100% | `411a66f` | 0.5 h |
-| **ARCH · Revisión arquitectónica R-1..R-9** | ✅ Completada | 100% | `TBD` | 3 h |
+| **ARCH · Revisión arquitectónica R-1..R-9** | ✅ Completada | 100% | `1e6018c` | 3 h |
 | **BUILD · Cross-compilación Linux** | ⏳ Pendiente | 0% | — | ~2 h |
 | **CI · Smoke test automatizado** | ⏳ Pendiente | 0% | — | ~2 h |
 
