@@ -1,0 +1,84 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TT-3 + TT-3i — Java unit tests + integration tests
+#
+# Build multi-stage:
+#   1. rust-builder  → compila libsqlite_native_runtime.so (Linux amd64/arm64)
+#   2. java-tester   → ejecuta mvn test + mvn test -Pintegration
+#
+# Uso local  : make container-test-java           (Podman)
+# CI         : make container-test-java CONTAINER_ENGINE=docker
+# Manual     : podman build -f containers/Dockerfile.java-test -t snr-java-test .
+#              podman run --rm snr-java-test
+#
+# Base etapa 2: eclipse-temurin:24-jdk-noble (Ubuntu 24.04 + Java 24)
+#   Java 24 ≥ 22 → Panama FFM (JEP 454) estable, sin --enable-preview.
+#   Nota: eclipse-temurin no publica variantes *-bookworm para arm64; se usa
+#   noble (Ubuntu 24.04 LTS) que es compatible con el .so glibc de la etapa 1.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# ── Etapa 1: Compilar la librería nativa Rust ─────────────────────────────────
+
+FROM debian:12-slim AS rust-builder
+
+ARG RUST_VERSION=stable
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      curl \
+      ca-certificates \
+      build-essential \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain ${RUST_VERSION}
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /app/rust
+
+# Caching de dependencias: manifiestos antes que código fuente
+COPY sqlite-native-runtime/rust/Cargo.toml ./Cargo.toml
+COPY sqlite-native-runtime/rust/Cargo.lock* ./
+
+RUN mkdir -p src \
+ && printf 'pub fn _placeholder() {}' > src/lib.rs \
+ && cargo build --release 2>&1 | tail -5 \
+ && rm -rf src target
+
+COPY sqlite-native-runtime/rust/src ./src
+COPY sqlite-native-runtime/rust/tests ./tests
+
+# Compilar la .so release (el artifact que usa Java)
+RUN cargo build --release \
+ && ls -lh target/release/libsqlite_native_runtime.so
+
+# ── Etapa 2: Tests Java ───────────────────────────────────────────────────────
+
+FROM eclipse-temurin:24-jdk-noble AS java-tester
+
+WORKDIR /app/java
+
+# Caching de dependencias Maven: copiar manifiestos antes que el código.
+# Si pom.xml no cambia, esta capa se reutiliza y no se re-descargan jars.
+COPY sqlite-native-runtime/java/.mvn   ./.mvn
+COPY sqlite-native-runtime/java/mvnw   ./
+COPY sqlite-native-runtime/java/pom.xml ./
+RUN chmod +x mvnw \
+ && ./mvnw dependency:go-offline --no-transfer-progress -q
+
+# Copiar código fuente (invalida solo esta capa en adelante)
+COPY sqlite-native-runtime/java/src ./src
+
+# Copiar librería nativa compilada en la etapa anterior
+COPY --from=rust-builder \
+     /app/rust/target/release/libsqlite_native_runtime.so \
+     /usr/local/lib/libsqlite_native_runtime.so
+
+# Panama FFM requiere acceso nativo; SNR_LIB apunta a la .so
+ENV SNR_LIB=/usr/local/lib/libsqlite_native_runtime.so
+
+# TT-3 : mvn test              → 128 tests JUnit 5 (JaCoCo ≥ 99% LINE)
+# TT-3i: mvn test -Pintegration → 32 tests @Tag("integration")
+CMD ["sh", "-c", \
+  "./mvnw test --no-transfer-progress \
+   && ./mvnw test -Pintegration --no-transfer-progress"]

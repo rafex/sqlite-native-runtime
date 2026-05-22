@@ -59,8 +59,11 @@
             Panama FFM necesita acceso nativo. JaCoCo inyecta su agente via @{argLine}
             (late binding): se resuelve en tiempo de ejecucion para incluir el -javaagent
             de JaCoCo. El argLine base añade el flag de Panama.
+            Los tests de integracion (@Tag("integration")) se excluyen del run por defecto
+            — se activan con: mvn test -Pintegration
           -->
           <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
+          <excludedGroups>integration</excludedGroups>
         </configuration>
       </plugin>
 
@@ -138,6 +141,28 @@
   </build>
 
   <profiles>
+    <!--
+      Perfil integration: activa los tests @Tag("integration") que se excluyen por defecto.
+      Uso: mvn test -Pintegration
+      Estos tests cubren concurrencia, WAL, datasets grandes y recuperación de errores.
+    -->
+    <profile>
+      <id>integration</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <version>3.5.2</version>
+            <configuration combine.self="override">
+              <groups>integration</groups>
+              <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
     <!--
       Perfil native: compila el smoke test como ejecutable nativo con GraalVM 25.
       Uso: JAVA_HOME=graalvm-25 mvn -Pnative package native:compile

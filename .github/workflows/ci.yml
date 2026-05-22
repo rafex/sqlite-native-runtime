@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancelar runs anteriores del mismo PR/branch para no saturar los runners
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ── TT-1 + TT-2 — Rust unit tests + FFI contract tests ──────────────────────
+  test-rust:
+    name: "🦀 Rust Tests (TT-1 + TT-2)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Caché de ~/.cargo/registry entre runs del mismo branch
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('sqlite-native-runtime/rust/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      # Caché de capas Docker/Podman para el Dockerfile.rust-test
+      - name: Cache Docker layers (rust-test)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-rust
+          key: ${{ runner.os }}-buildx-rust-${{ hashFiles('sqlite-native-runtime/rust/**', 'containers/Dockerfile.rust-test') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-rust-
+
+      - name: Build image and run Rust tests
+        run: make container-test-rust CONTAINER_ENGINE=docker
+
+  # ── TT-3 + TT-3i — Java unit tests + integration tests ──────────────────────
+  test-java:
+    name: "☕ Java Tests (TT-3 + TT-3i)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Caché de ~/.m2 para no re-descargar JARs de Maven en cada run
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('sqlite-native-runtime/java/pom.xml') }}
+          restore-keys: |
+            ${{ runner.os }}-maven-
+
+      # Caché de capas Docker para el Dockerfile.java-test (multi-stage)
+      - name: Cache Docker layers (java-test)
+        uses: actions/cache@v4
+        with:
+          path: /tmp/.buildx-cache-java
+          key: ${{ runner.os }}-buildx-java-${{ hashFiles('sqlite-native-runtime/rust/**', 'sqlite-native-runtime/java/**', 'containers/Dockerfile.java-test') }}
+          restore-keys: |
+            ${{ runner.os }}-buildx-java-
+
+      - name: Build image and run Java tests
+        run: make container-test-java CONTAINER_ENGINE=docker

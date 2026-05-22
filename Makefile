@@ -20,10 +20,18 @@ RUST_DIR := sqlite-native-runtime/rust
 # glibc mínima para máxima compatibilidad en Linux (Ubuntu 18.04+, Debian 10+)
 GLIBC_MIN := 2.17
 
+# Motor de contenedores: podman (local) o docker (CI).
+# Sobreescribir con: make container-test-rust CONTAINER_ENGINE=docker
+CONTAINER_ENGINE ?= podman
+
+CONTAINERS_DIR := containers
+
 .PHONY: all build-rust build-java build test smoke native \
         cross-linux-amd64 cross-linux-arm64 cross \
-        install package test-unit coverage \
-        test-rust coverage-rust test-ffi clean
+        install package test-unit test-integration coverage \
+        test-rust coverage-rust test-ffi \
+        container-test-rust container-test-java container-test \
+        clean
 
 all: build
 
@@ -120,6 +128,13 @@ test-unit: build-rust
 	  JAVA_HOME=$(GRAALVM_HOME) \
 	  $(MVNW) test
 
+# Ejecuta los tests de integración Java (@Tag("integration"))
+test-integration: build-rust
+	cd $(JAVA_DIR) && \
+	  SNR_LIB=$(SNR_LIB) \
+	  JAVA_HOME=$(GRAALVM_HOME) \
+	  $(MVNW) test -Pintegration
+
 # Ejecuta tests + verifica cobertura JaCoCo 100% LINE (excluye SqliteLibrary)
 # Reporte HTML: sqlite-native-runtime/java/target/site/jacoco/index.html
 coverage: build-rust
@@ -128,6 +143,33 @@ coverage: build-rust
 	  JAVA_HOME=$(GRAALVM_HOME) \
 	  $(MVNW) verify
 	@echo "Reporte de cobertura: $(JAVA_DIR)/target/site/jacoco/index.html"
+
+# ── Tests en contenedor (Podman/Docker) ──────────────────────────────────────
+#
+# Los mismos Dockerfiles se usan localmente (Podman) y en CI (Docker).
+# Sobreescribir el motor con: CONTAINER_ENGINE=docker make container-test-rust
+#
+# Contexto de build: raíz del repositorio (necesario para COPY de ambos subdirs).
+# .dockerignore excluye target/ y .git/ para mantener el contexto ligero.
+
+# TT-1 + TT-2: Rust unit tests + FFI contract tests
+container-test-rust:
+	$(CONTAINER_ENGINE) build \
+	  -f $(CONTAINERS_DIR)/Dockerfile.rust-test \
+	  -t snr-rust-test \
+	  .
+	$(CONTAINER_ENGINE) run --rm snr-rust-test
+
+# TT-3 + TT-3i: Java unit + integration tests (multi-stage: compila .so en el container)
+container-test-java:
+	$(CONTAINER_ENGINE) build \
+	  -f $(CONTAINERS_DIR)/Dockerfile.java-test \
+	  -t snr-java-test \
+	  .
+	$(CONTAINER_ENGINE) run --rm snr-java-test
+
+# Todos los tests en contenedor
+container-test: container-test-rust container-test-java
 
 # ── Limpieza ─────────────────────────────────────────────────────────────────
 

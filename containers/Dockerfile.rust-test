@@ -1,0 +1,57 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# TT-1 + TT-2 — Rust unit tests + FFI contract tests
+#
+# Uso local  : make container-test-rust           (Podman)
+# CI         : make container-test-rust CONTAINER_ENGINE=docker
+# Manual     : podman build -f containers/Dockerfile.rust-test -t snr-rust-test .
+#              podman run --rm snr-rust-test
+#
+# Base       : debian:12-slim (Debian Bookworm)
+# SQLite     : bundled en libsqlite3-sys (no requiere libsqlite3-dev del sistema)
+# ─────────────────────────────────────────────────────────────────────────────
+
+FROM debian:12-slim
+
+ARG RUST_VERSION=stable
+
+# build-essential: gcc + make (necesarios para compilar SQLite bundled via cc crate)
+# curl + ca-certificates: para descargar rustup
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      curl \
+      ca-certificates \
+      build-essential \
+ && rm -rf /var/lib/apt/lists/*
+
+# Instalar Rust (perfil minimal: rustc + cargo, sin docs ni clippy)
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain ${RUST_VERSION} \
+ && /root/.cargo/bin/rustup show
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+
+WORKDIR /app
+
+# ── Caching de dependencias ────────────────────────────────────────────────
+# Copiar solo los manifiestos primero: si el código cambia pero Cargo.toml no,
+# esta capa se reutiliza y no se re-descargan crates.
+COPY sqlite-native-runtime/rust/Cargo.toml ./Cargo.toml
+# Cargo.lock es opcional para librerías; si existe mejora la reproducibilidad
+COPY sqlite-native-runtime/rust/Cargo.lock* ./
+
+# Compilar una librería vacía para forzar la descarga de todas las dependencias
+RUN mkdir -p src \
+ && printf 'pub fn _placeholder() {}' > src/lib.rs \
+ && cargo build --release 2>&1 | tail -5 \
+ && rm -rf src target
+
+# ── Código fuente real ────────────────────────────────────────────────────
+COPY sqlite-native-runtime/rust/src   ./src
+COPY sqlite-native-runtime/rust/tests ./tests
+
+# ── Tests ────────────────────────────────────────────────────────────────
+# TT-1: cargo test --lib   → 137 tests #[cfg(test)] internos
+# TT-2: cargo test --test  → 50 tests FFI contract (requiere crate-type rlib)
+CMD ["sh", "-c", \
+  "cargo test --lib --color always \
+   && cargo test --test ffi_contract --color always"]

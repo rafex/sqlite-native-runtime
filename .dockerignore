@@ -1,0 +1,25 @@
+# ── Artefactos de build ───────────────────────────────────────────────────────
+# Excluir directorios target/ para evitar enviar cientos de MB al daemon de
+# contenedor. Podman/Docker solo necesita el código fuente.
+
+sqlite-native-runtime/rust/target/
+sqlite-native-runtime/java/target/
+
+# ── Control de versiones ─────────────────────────────────────────────────────
+.git/
+.gitignore
+.gitattributes
+
+# ── Documentación (no necesaria para los tests) ───────────────────────────────
+docs/
+*.md
+
+# ── Archivos del IDE / sistema ───────────────────────────────────────────────
+.DS_Store
+.idea/
+*.iml
+.vscode/
+
+# ── Los propios Dockerfiles y CI (no se usan dentro del contenedor) ──────────
+containers/
+.github/

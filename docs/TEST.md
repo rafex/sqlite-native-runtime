@@ -7,8 +7,9 @@
 | 🦀 **TT-1** Rust Unit | `cargo test --lib` | **137** | **96.08% LINE** (llvm-cov) | ✅ Completo |
 | 🔗 **TT-2** FFI Contract | `cargo test --test` | **50** | ABI surface cubierta | ✅ Completo |
 | ☕ **TT-3** Java Unit | `mvn test` (JaCoCo) | **128** | **99% LINE** (JaCoCo) | ✅ Completo |
-| ☕ **TT-3i** Java Integration | `@Tag("integration")` | — | — | 🔲 Pendiente |
+| ☕ **TT-3i** Java Integration | `mvn test -Pintegration` | **32** | escenarios reales | ✅ Completo |
 | 🔮 **TT-4** GraalVM Native | `make native-test` | — | — | 🔲 Pendiente |
+| 🐳 **Contenedores** | `make container-test` | **347** | TT-1+2 Rust · TT-3+3i Java | ✅ Completo |
 
 ---
 
@@ -122,6 +123,43 @@ Reporte HTML: `sqlite-native-runtime/java/target/site/jacoco/index.html`
 
 ---
 
+## ☕ TT-3i — Java Integration Tests (`mvn test -Pintegration`)
+
+Tests JUnit 5 con `@Tag("integration")` — escenarios realistas de uso que los unit tests
+no pueden cubrir: concurrencia con virtual threads (Project Loom), múltiples conexiones
+WAL, datasets grandes y recuperación de errores.
+
+```
+make test-integration   # o: mvn test -Pintegration
+```
+
+**Estado:** ✅ 32 tests, todos pasan.
+
+### Distribución por clase `@Nested`
+
+| Clase | Tests | Qué valida |
+|---|---|---|
+| `ConcurrentReadsTest` | 3 | 20/50 virtual threads leen la misma BD, columnas mixtas sin corrupción |
+| `ConcurrentWritesTest` | 3 | 10×100 inserts, reads/writes interleaved, transacciones serializadas con lock |
+| `MultiConnectionWalTest` | 4 | writer+reader WAL coexisten, readers concurrentes sin SQLITE_BUSY, checkpoint PASSIVE/TRUNCATE |
+| `BulkInsertTest` | 3 | 10 000 inserts en una sola transacción, primera/última fila, named params |
+| `LargeDataTest` | 4 | TEXT 1 MB, TEXT Unicode 1 MB, BLOB 1 MB round-trip, BLOB vacío ≠ NULL |
+| `StatementReuseTest` | 3 | 1 000 ciclos insert/reset, 1 000 ciclos SELECT/reset, clearBindings entre ciclos |
+| `ConnectionPoolSimTest` | 3 | 50 open/close secuenciales sin leak, 20 conexiones virtuales paralelas, 20 conexiones a fichero |
+| `ErrorRecoveryTest` | 4 | rollback automático en exception, conexión reutilizable, withSavepoint scope, 5 fallos consecutivos |
+| `SavepointNestingTest` | 3 | 3 niveles anidados commit, rollback inner preserva outer, semántica manual savepoint/release/rollbackTo |
+| `WalCheckpointLoadTest` | 2 | auto-checkpoint desactivado + checkpoint manual, dbName null vs "" equivalentes |
+
+### Notas de diseño
+
+- `SqliteStatement` **no es thread-safe** — cada virtual thread crea su propia instancia.
+- `SqliteConnection` es thread-safe (FULLMUTEX + Mutex Rust), pero `BEGIN/COMMIT`
+  no se puede interleave: se usa `synchronized(db)` para serializar transacciones concurrentes.
+- `@TempDir` resuelto con `toRealPath()` — evita el symlink `/var/folders` → `/private/var/folders`
+  en macOS con `SQLITE_OPEN_NOFOLLOW`.
+
+---
+
 ## 🔮 TT-4 — GraalVM Native (`make native-test`)
 
 Valida que la librería funciona compilada como ejecutable nativo GraalVM (AOT).
@@ -145,22 +183,56 @@ código ≠ 0) está planificada en TT-4 del backlog.
 | Scope | Tests | Cobertura |
 |---|---|---|
 | Rust (TT-1 + TT-2) | **187** | 96.08% LINE Rust |
-| Java (TT-3 unit) | **128** | ≥ 99% LINE Java |
-| **Grand total** | **315** | — |
+| Java unit (TT-3) | **128** | ≥ 99% LINE Java |
+| Java integration (TT-3i) | **32** | escenarios reales |
+| **Grand total** | **347** | — |
+
+---
+
+## 🐳 Contenedores (Podman / Docker)
+
+Tests en contenedor Linux (Debian 12 slim) — aíslan el entorno del host y se
+reutilizan en CI (GitHub Actions). Compatible con Podman (local) y Docker (CI).
+
+```
+make container-test-rust    # TT-1+TT-2 en contenedor (Debian 12 + Rust stable)
+make container-test-java    # TT-3+TT-3i en contenedor (multi-stage)
+make container-test         # ambos en secuencia
+```
+
+Para usar Docker en lugar de Podman:
+```bash
+make container-test CONTAINER_ENGINE=docker
+```
+
+### Diseño de las imágenes
+
+| Imagen | Base | Etapas | Ejecuta |
+|---|---|---|---|
+| `snr-rust-test` | `debian:12-slim` | 1 | `cargo test --lib` + `cargo test --test ffi_contract` |
+| `snr-java-test` | `debian:12-slim` → `eclipse-temurin:24-jdk-noble` | 2 | `mvn test` + `mvn test -Pintegration` |
+
+La etapa 1 de `snr-java-test` compila el `.so` nativo dentro del contenedor —
+no requiere tener Rust instalado en el host para correr los tests Java en contenedor.
+
+SQLite está **bundled** en la crate (`features = ["bundled"]`): no requiere
+`libsqlite3-dev` en el sistema. Solo necesita `build-essential` (gcc).
 
 ---
 
 ## Ejecutar todo
 
 ```bash
-# Capa Rust completa
-make test-rust   # 137 unit tests
-make test-ffi    # 50 FFI contract tests
+# Host macOS (requiere GraalVM 25 + Rust instalados)
+make test-rust          # 137 Rust unit tests
+make test-ffi           # 50 FFI contract tests
+make coverage-rust      # cobertura Rust (requiere cargo-llvm-cov)
+make test-unit          # 128 Java unit tests
+make test-integration   # 32 Java integration tests
+make coverage           # 128 tests + reporte JaCoCo HTML
 
-# Cobertura Rust (requiere: cargo install cargo-llvm-cov)
-make coverage-rust
-
-# Java
-make test-unit   # 128 JUnit tests
-make coverage    # 128 tests + reporte JaCoCo
+# Contenedor Linux (solo requiere Podman o Docker)
+make container-test-rust   # TT-1 + TT-2 en contenedor
+make container-test-java   # TT-3 + TT-3i en contenedor
+make container-test        # todos los anteriores
 ```
