@@ -1,25 +1,57 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# ci.yml — Integración continua
+#
+# Dispara en:
+#   • push a main  (validar que main siempre está verde)
+#   • pull_request (validar antes de integrar)
+#
+# Jobs (paralelos):
+#   test-rust  → TT-1 (unit) + TT-2 (FFI contract)  dentro de un contenedor Debian 12
+#   test-java  → TT-3 (unit) + TT-3i (integration)  dentro de un contenedor multi-stage
+# ─────────────────────────────────────────────────────────────────────────────
+
 name: CI
 
 on:
   push:
     branches: [main]
+    paths:
+      # Código fuente Rust y Java
+      - 'sqlite-native-runtime/**'
+      # Dockerfiles de test
+      - 'containers/**'
+      # Scripts de build/test y archivos de configuración de Make/Just
+      - 'scripts/**'
+      - 'Makefile'
+      - 'Justfile'
+      # El propio workflow (cambios en CI deben validarse)
+      - '.github/workflows/ci.yml'
   pull_request:
+    paths:
+      - 'sqlite-native-runtime/**'
+      - 'containers/**'
+      - 'scripts/**'
+      - 'Makefile'
+      - 'Justfile'
+      - '.github/workflows/ci.yml'
 
-# Cancelar runs anteriores del mismo PR/branch para no saturar los runners
+# Cancela runs anteriores del mismo PR/branch para no saturar los runners
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+env:
+  CONTAINER_ENGINE: docker
 
 jobs:
 
   # ── TT-1 + TT-2 — Rust unit tests + FFI contract tests ──────────────────────
   test-rust:
-    name: "🦀 Rust Tests (TT-1 + TT-2)"
+    name: "🦀 Rust (TT-1 unit + TT-2 FFI)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Caché de ~/.cargo/registry entre runs del mismo branch
       - name: Cache Cargo registry
         uses: actions/cache@v4
         with:
@@ -28,45 +60,24 @@ jobs:
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
           key: ${{ runner.os }}-cargo-${{ hashFiles('sqlite-native-runtime/rust/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
-
-      # Caché de capas Docker/Podman para el Dockerfile.rust-test
-      - name: Cache Docker layers (rust-test)
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache-rust
-          key: ${{ runner.os }}-buildx-rust-${{ hashFiles('sqlite-native-runtime/rust/**', 'containers/Dockerfile.rust-test') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-rust-
+          restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build image and run Rust tests
-        run: make container-test-rust CONTAINER_ENGINE=docker
+        run: make container-test-rust
 
   # ── TT-3 + TT-3i — Java unit tests + integration tests ──────────────────────
   test-java:
-    name: "☕ Java Tests (TT-3 + TT-3i)"
+    name: "☕ Java (TT-3 unit + TT-3i integration)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      # Caché de ~/.m2 para no re-descargar JARs de Maven en cada run
       - name: Cache Maven repository
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
           key: ${{ runner.os }}-maven-${{ hashFiles('sqlite-native-runtime/java/pom.xml') }}
-          restore-keys: |
-            ${{ runner.os }}-maven-
-
-      # Caché de capas Docker para el Dockerfile.java-test (multi-stage)
-      - name: Cache Docker layers (java-test)
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache-java
-          key: ${{ runner.os }}-buildx-java-${{ hashFiles('sqlite-native-runtime/rust/**', 'sqlite-native-runtime/java/**', 'containers/Dockerfile.java-test') }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-java-
+          restore-keys: ${{ runner.os }}-maven-
 
       - name: Build image and run Java tests
-        run: make container-test-java CONTAINER_ENGINE=docker
+        run: make container-test-java

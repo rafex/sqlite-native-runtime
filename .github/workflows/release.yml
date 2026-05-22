@@ -1,0 +1,268 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# release.yml — Publicación de artefactos
+#
+# Dispara en: push de un tag con patrón v* (ej. v0.1.0, v1.2.3)
+#
+# Artefactos publicados en el GitHub Release:
+#   libsqlite_native_runtime-linux-amd64.so      ← Rust nativo en runner x86_64
+#   libsqlite_native_runtime-linux-amd64.so.sha256
+#   libsqlite_native_runtime-linux-arm64.so      ← Rust nativo en runner arm64
+#   libsqlite_native_runtime-linux-arm64.so.sha256
+#   sqlite-native-runtime-{version}.jar          ← Java JAR
+#   sqlite-native-runtime-{version}.jar.sha256
+#   snr-smoke-linux-amd64                        ← GraalVM Native Image x86_64
+#   snr-smoke-linux-amd64.sha256
+#   snr-smoke-linux-arm64                        ← GraalVM Native Image arm64
+#   snr-smoke-linux-arm64.sha256
+#
+# Grafo de dependencias (matrix collapsa los jobs por arquitectura):
+#
+#   build-rust  [amd64] ──┐
+#   build-rust  [arm64] ──┤──→ build-native [amd64] ──┐
+#                         └──→ build-native [arm64] ───┤
+#   build-java-jar ─────────────────────────────────────┤──→ release
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*'
+
+# Necesario para crear GitHub Releases y subir assets
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # glibc mínima garantizada por cargo-zigbuild: Ubuntu 18.04+ / Debian 10+ / RHEL 7+
+  GLIBC_MIN: "2.17"
+
+jobs:
+
+  # ── 1. Compilar libsqlite_native_runtime.so — matrix x86_64 / arm64 ──────────
+  #
+  # Cada variante corre en el runner nativo de su arquitectura y usa cargo-zigbuild
+  # para pinear la versión mínima de glibc (independientemente de la del runner).
+  # La .so producida es nativa (no cross-compilada) con glibc $GLIBC_MIN+ linkada.
+  build-rust:
+    name: "🦀 Rust .so (${{ matrix.arch }})"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+            zig_arch: x86_64
+            lib: libsqlite_native_runtime-linux-amd64.so
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            zig_arch: aarch64
+            lib: libsqlite_native_runtime-linux-arm64.so
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Clave por runner para que amd64 y arm64 no compartan cache incompatible
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ matrix.runner }}-cargo-${{ hashFiles('sqlite-native-runtime/rust/Cargo.lock') }}
+          restore-keys: ${{ matrix.runner }}-cargo-
+
+      # Descarga el binario de zig para la arquitectura del runner
+      - name: Install Zig (${{ matrix.zig_arch }})
+        run: |
+          ZIG_VERSION=0.13.0
+          curl -fsSL \
+            "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${{ matrix.zig_arch }}-${ZIG_VERSION}.tar.xz" \
+            -o /tmp/zig.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C /tmp
+          echo "/tmp/zig-linux-${{ matrix.zig_arch }}-${ZIG_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild --locked
+
+      # El target es la misma arquitectura que el runner, pero zigbuild pina glibc
+      - name: Add Rust target (${{ matrix.rust_target }})
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Build .so (glibc ${{ env.GLIBC_MIN }}+)
+        working-directory: sqlite-native-runtime/rust
+        run: cargo zigbuild --release --target "${{ matrix.rust_target }}.${{ env.GLIBC_MIN }}"
+
+      - name: Collect artifact
+        run: |
+          mkdir -p dist
+          cp sqlite-native-runtime/rust/target/${{ matrix.rust_target }}/release/libsqlite_native_runtime.so \
+             dist/${{ matrix.lib }}
+
+      # Nombre único por variante — el job release los unifica con merge-multiple
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rust-lib-${{ matrix.arch }}
+          path: dist/
+
+  # ── 2. Construir el JAR Java ─────────────────────────────────────────────────
+  #
+  # El JAR no depende de la arquitectura (bytecode portable).
+  # Un único job ubuntu-latest con GraalVM JDK 25 es suficiente.
+  build-java-jar:
+    name: "☕ Java JAR"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup GraalVM JDK 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-${{ hashFiles('sqlite-native-runtime/java/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-
+
+      # Alinea la versión del pom.xml con el tag (v0.1.0 → 0.1.0)
+      - name: Set pom.xml version from tag
+        working-directory: sqlite-native-runtime/java
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ./mvnw versions:set -DnewVersion="${VERSION}" -DgenerateBackupPoms=false \
+            --no-transfer-progress -q
+
+      - name: Build JAR (tests validados en CI)
+        working-directory: sqlite-native-runtime/java
+        run: ./mvnw package -DskipTests --no-transfer-progress
+
+      - name: Collect artifact
+        run: |
+          mkdir -p dist
+          VERSION="${GITHUB_REF_NAME#v}"
+          cp "sqlite-native-runtime/java/target/sqlite-native-runtime-${VERSION}.jar" \
+             "dist/sqlite-native-runtime-${VERSION}.jar"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: java-jar
+          path: dist/
+
+  # ── 3. GraalVM Native Image — matrix x86_64 / arm64 ─────────────────────────
+  #
+  # native-image no soporta cross-compilación: cada arquitectura compila en su
+  # runner nativo. Cada variante descarga únicamente la .so de su arquitectura.
+  #
+  # Nota: GitHub Actions espera que TODOS los variants de build-rust completen
+  # antes de iniciar CUALQUIER variant de build-native (limitación de la plataforma).
+  build-native:
+    name: "⚡ Native Image (${{ matrix.arch }})"
+    runs-on: ${{ matrix.runner }}
+    needs: build-rust
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            lib: libsqlite_native_runtime-linux-amd64.so
+            binary: snr-smoke-linux-amd64
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            lib: libsqlite_native_runtime-linux-arm64.so
+            binary: snr-smoke-linux-arm64
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # Descarga solo la .so de la arquitectura correspondiente a esta variante.
+      # SqliteLibrary usa --initialize-at-run-time: la .so no se carga durante
+      # native:compile, pero SNR_LIB debe apuntar a un path existente.
+      - name: Download .so (${{ matrix.arch }})
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-lib-${{ matrix.arch }}
+          path: dist
+
+      - name: Setup GraalVM JDK 25 (con native-image)
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          native-image-job-reports: 'true'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      # Clave por arquitectura: los JARs de Maven son portables pero el runner
+      # arm64 tiene su propio ~/.m2 independiente
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ matrix.runner }}-maven-${{ hashFiles('sqlite-native-runtime/java/pom.xml') }}
+          restore-keys: ${{ matrix.runner }}-maven-
+
+      - name: Build GraalVM Native Image
+        working-directory: sqlite-native-runtime/java
+        env:
+          SNR_LIB: ${{ github.workspace }}/dist/${{ matrix.lib }}
+        run: ./mvnw -Pnative package native:compile -DskipTests --no-transfer-progress
+
+      - name: Collect artifact
+        run: |
+          mkdir -p out
+          cp sqlite-native-runtime/java/target/snr-smoke out/${{ matrix.binary }}
+          chmod +x out/${{ matrix.binary }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-img-${{ matrix.arch }}
+          path: out/
+
+  # ── 4. Calcular SHA256 y crear el GitHub Release ──────────────────────────────
+  release:
+    name: "🚀 GitHub Release ${{ github.ref_name }}"
+    runs-on: ubuntu-latest
+    needs: [build-rust, build-java-jar, build-native]
+    steps:
+      # merge-multiple: true une todos los artefactos de los matrix jobs en un
+      # solo directorio, sin subdirectorios por nombre de artefacto
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: artifacts
+
+      - name: List artifacts
+        run: ls -lh artifacts/
+
+      # Un .sha256 por artefacto, formato compatible con `sha256sum -c`:
+      #   sha256sum -c sqlite-native-runtime-0.1.0.jar.sha256
+      - name: Compute SHA256 checksums
+        working-directory: artifacts
+        run: |
+          for f in *; do
+            sha256sum "$f" > "${f}.sha256"
+            echo "  ✓ $(cat ${f}.sha256)"
+          done
+
+      # --generate-notes: GitHub construye el changelog desde los commits entre tags
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "${{ github.ref_name }}" \
+            --title "Release ${{ github.ref_name }}" \
+            --generate-notes \
+            artifacts/*
