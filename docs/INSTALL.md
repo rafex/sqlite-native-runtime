@@ -5,10 +5,39 @@
 | Requisito | Versión mínima | Notas |
 |---|---|---|
 | **Java** | 22 | Panama FFM (JEP 454) es estable desde Java 22. GraalVM JDK 25 recomendado. |
-| **OS** | Linux x86\_64 / arm64 | Binarios pre-compilados disponibles. macOS: compilar desde fuente. |
+| **OS** | Linux x86\_64 / arm64 **64-bit** | Binarios pre-compilados disponibles. macOS: compilar desde fuente. |
 | `curl` o `wget` | cualquiera | Necesario para el script de instalación. |
 
 La librería nativa **no requiere** SQLite instalado en el sistema — SQLite 3 está compilado dentro del `.so` (amalgamation bundled via `libsqlite3-sys`).
+
+---
+
+## Soporte Raspberry Pi
+
+| Modelo | CPU | OS 64-bit (aarch64) | OS 32-bit (armhf) |
+|---|---|---|---|
+| Raspberry Pi 3B | Cortex-A53 (ARMv8.0) | ✅ Soportado | ❌ No soportado |
+| Raspberry Pi 4B | Cortex-A72 (ARMv8.2) | ✅ Soportado | ❌ No soportado |
+
+**¿Por qué no se soporta arm32 (OS 32-bit)?**  
+Java 22+ (requerido por Panama FFM / JEP 454) **no publica builds para arm32**. Los distribuidores principales (Eclipse Temurin, Azul Zulu, GraalVM) abandonaron arm32 a partir de Java 22. Sin JDK no hay forma de cargar la librería nativa.
+
+**Raspberry Pi 3B y 4B con OS 64-bit funcionan sin configuración adicional:**
+
+```sh
+# 1. Instalar un OS 64-bit en tu Raspberry Pi:
+#    Raspberry Pi OS 64-bit  → https://www.raspberrypi.com/software/
+#    Ubuntu Server 24.04 LTS → https://ubuntu.com/download/raspberry-pi
+
+# 2. Instalar la librería (detecta aarch64 automáticamente):
+curl -sS https://raw.githubusercontent.com/rafex/sqlite-native-runtime/main/scripts/release/install.sh | sh
+
+# 3. Ejecutar tu aplicación:
+java --enable-native-access=ALL-UNNAMED -jar mi-app.jar
+```
+
+> Si ejecutas `install.sh` en un OS 32-bit recibirás un mensaje de error claro  
+> con instrucciones para migrar a 64-bit.
 
 ---
 

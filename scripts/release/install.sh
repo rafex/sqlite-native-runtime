@@ -71,9 +71,33 @@ esac
 # ── Detectar arquitectura ─────────────────────────────────────────────────────
 ARCH="$(uname -m)"
 case "$ARCH" in
-    x86_64)         LIB_ARCH="linux-amd64"  ;;
-    aarch64|arm64)  LIB_ARCH="linux-arm64"  ;;
-    *)              die "Arquitectura no soportada: ${ARCH}" ;;
+    x86_64)
+        LIB_ARCH="linux-amd64"
+        ;;
+    aarch64|arm64)
+        LIB_ARCH="linux-arm64"
+        ;;
+    armv7l|armv6l|armhf)
+        echo ""
+        warn "Raspberry Pi / ARM 32-bit detectado (${ARCH})."
+        warn "sqlite-native-runtime NO soporta sistemas operativos de 32-bit en ARM."
+        warn ""
+        warn "Motivo: esta librería requiere Java 22+ (Panama FFM, JEP 454)."
+        warn "Java 22 y superiores NO publican builds para arm32 (armhf/armv7l)."
+        warn "GraalVM Native Image tampoco soporta arm32."
+        warn ""
+        warn "Solución para Raspberry Pi 3B / 4B:"
+        warn "  Instala un sistema operativo de 64-bit:"
+        warn "    • Raspberry Pi OS 64-bit → https://www.raspberrypi.com/software/"
+        warn "    • Ubuntu Server 24.04 LTS arm64 → https://ubuntu.com/download/raspberry-pi"
+        warn ""
+        warn "Con un OS 64-bit (aarch64) la librería funciona sin cambios adicionales."
+        echo ""
+        exit 1
+        ;;
+    *)
+        die "Arquitectura no soportada: ${ARCH}"
+        ;;
 esac
 
 LIB_ARTIFACT="libsqlite_native_runtime-${LIB_ARCH}.so"
