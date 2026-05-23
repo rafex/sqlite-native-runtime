@@ -49,8 +49,12 @@ RUN cargo build --release \
  && ls -lh target/release/libether_sqlite_runtime.so
 
 # ── Etapa 2: Tests Java 25 (Panama FFM estable, sin --enable-preview) ─────────
+#
+# ghcr.io/graalvm/jdk-community:25 incluye JDK 25 completo.
+# eclipse-temurin no publica imagen :25 aún; GraalVM Community es el JDK 25
+# más estable disponible como imagen Docker.
 
-FROM eclipse-temurin:24-jdk-noble AS java25-tester
+FROM ghcr.io/graalvm/jdk-community:25 AS java25-tester
 
 WORKDIR /app/java25
 
