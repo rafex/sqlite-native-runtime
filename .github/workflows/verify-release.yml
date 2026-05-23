@@ -1,12 +1,8 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # verify-release.yml — Verifica los artefactos del GitHub Release
 #
-# Dispara automáticamente cuando el workflow "Release" completa con éxito,
-# garantizando que todos los artefactos publicados funcionan correctamente
-# antes de considerarlos estables.
-#
-# También puede ejecutarse manualmente para re-verificar un release existente:
-#   Actions → Verify Release → Run workflow → introducir el tag (ej. v0.1.1)
+# Dispara ÚNICAMENTE cuando el workflow "Release" completa con éxito.
+# No tiene ningún otro trigger (ni workflow_dispatch, ni push, ni schedule).
 #
 # Qué valida (para cada arquitectura):
 #   1. install.sh del release   — el script de instalación publicado funciona
@@ -16,34 +12,22 @@
 #   5. Native Image (build)     — compilación de Main.java con native-image 25
 #
 # Grafo de ejecución:
-#   Release (workflow) ──→ verify [amd64 / arm64]  (matrix, runners nativos)
+#   Release (workflow) ──on:workflow_run──→ verify [amd64 / arm64]
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Verify Release
 
 on:
-  # Dispara cuando el workflow "Release" termina (exitosamente o con fallo).
-  # El job tiene un 'if' que lo omite si el Release falló.
   workflow_run:
     workflows: ["Release"]
     types: [completed]
-
-  # Permite re-verificar manualmente un release existente.
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Tag del release a verificar (ej. v0.1.1). Vacío = último release.'
-        required: false
-        type: string
 
 permissions:
   contents: read
 
 env:
-  # En workflow_run: head_branch es el tag que disparó el Release (ej. v0.1.1).
-  # En workflow_dispatch con tag explícito: usa el input.
-  # En workflow_dispatch sin tag: usa "latest" (último release publicado).
-  SNR_VERSION: ${{ inputs.tag || github.event.workflow_run.head_branch || 'latest' }}
+  # head_branch en un workflow_run disparado por push de tag = el tag (ej. v0.1.1)
+  SNR_VERSION: ${{ github.event.workflow_run.head_branch }}
 
 jobs:
 
@@ -51,10 +35,8 @@ jobs:
     name: "🔍 Verify ${{ env.SNR_VERSION }} (${{ matrix.arch }})"
     runs-on: ${{ matrix.runner }}
 
-    # Solo ejecutar si el Release fue exitoso (no aplica en workflow_dispatch)
-    if: >
-      github.event_name == 'workflow_dispatch' ||
-      github.event.workflow_run.conclusion == 'success'
+    # Solo ejecutar si el Release completó con éxito
+    if: github.event.workflow_run.conclusion == 'success'
 
     strategy:
       fail-fast: false
