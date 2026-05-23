@@ -192,10 +192,10 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
 
-      - name: Setup GraalVM JDK 25
+      - name: Setup GraalVM JDK 21
         uses: graalvm/setup-graalvm@v1
         with:
-          java-version: '25'
+          java-version: '21'
           distribution: 'graalvm'
           github-token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -329,10 +329,10 @@ jobs:
           name: rust-lib-${{ matrix.arch }}
           path: dist
 
-      - name: Setup GraalVM JDK 25 (con native-image)
+      - name: Setup GraalVM JDK 21 (con native-image)
         uses: graalvm/setup-graalvm@v1
         with:
-          java-version: '25'
+          java-version: '21'
           distribution: 'graalvm'
           native-image-job-reports: 'true'
           github-token: ${{ secrets.GITHUB_TOKEN }}
