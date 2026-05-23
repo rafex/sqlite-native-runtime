@@ -22,6 +22,10 @@ on:
     workflows: ["Release"]
     types: [completed]
 
+  # Permite lanzar manualmente contra el último release publicado.
+  # No acepta inputs: siempre valida el latest.
+  workflow_dispatch:
+
 permissions:
   contents: read
 
@@ -33,9 +37,9 @@ jobs:
     name: "🔍 Verify ${{ github.event.workflow_run.head_branch }} (${{ matrix.arch }})"
     runs-on: ${{ matrix.runner }}
 
-    # Solo ejecutar si el Release completó con éxito.
-    # La expresión debe ir entre ${{ }} para evitar ambigüedad de parseo YAML.
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    # workflow_run : solo si el Release completó con éxito.
+    # workflow_dispatch: siempre (el usuario lo lanzó explícitamente).
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     strategy:
       fail-fast: false
@@ -54,9 +58,12 @@ jobs:
         with:
           ref: main
 
+      # workflow_dispatch → head_branch vacío → SNR_VERSION=latest (último release)
+      # workflow_run     → head_branch = tag que disparó el Release (ej. v0.1.3)
       - name: "Mostrar configuración"
         run: |
-          echo "Release a verificar : ${{ github.event.workflow_run.head_branch }}"
+          SNR_VERSION="${{ github.event.workflow_run.head_branch || 'latest' }}"
+          echo "Release a verificar : ${SNR_VERSION}"
           echo "Arquitectura        : ${{ matrix.arch }}"
           echo "Runner              : ${{ matrix.runner }}"
           echo "Docker version      : $(docker --version)"
@@ -66,12 +73,12 @@ jobs:
       - name: "Build y test de artefactos del release"
         run: |
           docker build \
-            --build-arg SNR_VERSION="${{ github.event.workflow_run.head_branch }}" \
+            --build-arg SNR_VERSION="${{ github.event.workflow_run.head_branch || 'latest' }}" \
             --progress=plain \
             --target test-release \
             containers/test-release/
 
       - name: "✅ Release verificado"
         run: |
-          echo "Los artefactos del release ${{ github.event.workflow_run.head_branch }}"
+          echo "Los artefactos del release ${{ github.event.workflow_run.head_branch || 'latest' }}"
           echo "han sido verificados correctamente en ${{ matrix.arch }}."
