@@ -6,36 +6,51 @@
 #   linux/arm64  (aarch64)
 #
 # Etapas:
-#   downloader    → descarga y verifica (SHA256) .so, JARs y binario nativo pre-compilado
-#   test-jvm      → ejecuta la suite con thin JAR y fat JAR en la JVM de GraalVM 25
-#   build-native  → compila Main.java como GraalVM Native Image
-#   test-release  → ejecuta el binario pre-compilado del release y el binario custom;
-#                   también arrastra el resultado de test-jvm para fallar si éste falló.
+#   installer     → descarga install.sh del release y lo ejecuta para instalar
+#                   la .so; descarga y verifica (SHA256) JARs y binario nativo
+#   test-jvm      → ejecuta la suite con thin JAR y fat JAR en GraalVM JDK 25
+#   build-native  → compila Main.java como GraalVM Native Image (--no-fallback)
+#   test-release  → ejecuta el binario pre-compilado del release y el binario
+#                   compilado en esta build; arrastra el marcador de test-jvm
 #
-# Uso rápido:
-#   # Último release publicado, ambas arquitecturas:
+# Uso manual (local):
+#   # Último release publicado, ambas arquitecturas (requiere QEMU o runners nativos):
 #   docker buildx build --platform linux/amd64,linux/arm64 \
-#     --progress=plain containers/test-release/
+#     --progress=plain --target test-release containers/test-release/
 #
 #   # Versión específica en una sola arquitectura:
 #   docker buildx build --platform linux/amd64 \
 #     --build-arg SNR_VERSION=v0.1.1 \
-#     --progress=plain containers/test-release/
+#     --progress=plain --target test-release containers/test-release/
+#
+# Uso en CI (via just o el workflow verify-release.yml):
+#   just test-release                  ← ambas archs, último release
+#   just test-release v0.1.1           ← versión específica
 #
 # Variables:
 #   SNR_VERSION   versión del release a probar (default: latest)
-#   GRAALVM_TAG   tag de la imagen GraalVM (default: 25)
+#   GRAALVM_TAG   tag de las imágenes GraalVM (default: 25)
 # ─────────────────────────────────────────────────────────────────────────────
 
 ARG SNR_VERSION=latest
 ARG GRAALVM_TAG=25
 
-# ── Etapa 1: Descargar y verificar todos los artefactos ───────────────────────
+# ── Etapa 1: install.sh del release + descarga de JARs y binario nativo ───────
 #
-# TARGETARCH es establecido por Docker buildx automáticamente:
-#   linux/amd64  → TARGETARCH=amd64
-#   linux/arm64  → TARGETARCH=arm64
-FROM ubuntu:24.04 AS downloader
+# Se usa debian:12-slim (imagen mínima) para mantener el tamaño pequeño.
+#
+# install.sh se descarga del propio release (no del repositorio) para validar
+# que el script publicado funciona correctamente.
+#
+# Sin sudo disponible en el contenedor, install.sh usa modo usuario:
+#   → /root/.local/lib/libsqlite_native_runtime.so
+# Las etapas siguientes copian la .so a /usr/local/lib/ donde la JVM la
+# encontrará automáticamente.
+#
+# TARGETARCH es establecido por Docker buildx automáticamente.
+# Cuando se usa `docker build` sin --platform en un runner nativo, se infiere
+# desde uname -m como fallback (el mismo mecanismo que usa install.sh).
+FROM debian:12-slim AS installer
 
 ARG SNR_VERSION
 ARG TARGETARCH
@@ -53,79 +68,103 @@ RUN set -e; \
     \
     # ── Resolver versión ─────────────────────────────────────────────────── \
     if [ "${SNR_VERSION}" = "latest" ]; then \
-        VERSION="$(curl -fsSL "${API}/latest" | grep '"tag_name"' \
+        VERSION="$(curl -fsSL "${API}/latest" \
+            | grep '"tag_name"' \
             | sed 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/' \
             | tr -d '[:space:]')"; \
         [ -n "${VERSION}" ] || { echo "ERROR: no se pudo obtener la versión"; exit 1; }; \
     else \
         VERSION="${SNR_VERSION}"; \
     fi; \
-    echo "${VERSION}"     > VERSION; \
-    echo "${VERSION#v}"   > VERSION_NUM; \
-    printf "\n>>> Versión: %s  |  Arch: %s\n\n" "${VERSION}" "${TARGETARCH}"; \
+    echo "${VERSION}"   > /artifacts/VERSION; \
+    echo "${VERSION#v}" > /artifacts/VERSION_NUM; \
+    printf "\n>>> Release: %s\n\n" "${VERSION}"; \
     \
     BASE="${DL}/${VERSION}"; \
     VER="${VERSION#v}"; \
     \
-    # ── Mapear TARGETARCH al nombre del artefacto ────────────────────────── \
-    case "${TARGETARCH}" in \
+    # ── Inferir arquitectura (TARGETARCH puede estar vacío sin --platform) ── \
+    TARCH="${TARGETARCH:-}"; \
+    if [ -z "${TARCH}" ]; then \
+        case "$(uname -m)" in \
+            x86_64)         TARCH="amd64" ;; \
+            aarch64|arm64)  TARCH="arm64" ;; \
+            *) echo "ERROR: arquitectura no soportada: $(uname -m)"; exit 1 ;; \
+        esac; \
+    fi; \
+    case "${TARCH}" in \
         amd64) ARCH_LABEL="linux-amd64" ;; \
         arm64) ARCH_LABEL="linux-arm64" ;; \
-        *)     echo "ERROR: arquitectura no soportada: ${TARGETARCH}"; exit 1 ;; \
+        *)     echo "ERROR: TARGETARCH no soportado: ${TARCH}"; exit 1 ;; \
     esac; \
+    echo "${ARCH_LABEL}" > /artifacts/ARCH_LABEL; \
+    printf ">>> Arquitectura: %s\n\n" "${ARCH_LABEL}"; \
+    \
+    # ── install.sh del release — valida el script de instalación publicado ── \
+    # Descarga el install.sh desde los assets del release (no del repo),       \
+    # lo ejecuta con SNR_VERSION fijado para instalar exactamente esta versión. \
+    # Sin sudo en el contenedor → modo usuario → /root/.local/lib/             \
+    printf ">>> Ejecutando install.sh del release %s...\n" "${VERSION}"; \
+    curl -fsSL "${BASE}/install.sh" -o /tmp/install.sh; \
+    chmod +x /tmp/install.sh; \
+    SNR_VERSION="${VERSION}" sh /tmp/install.sh; \
+    \
+    # Verificar que la librería quedó instalada correctamente \
+    LIB_PATH="/root/.local/lib/libsqlite_native_runtime.so"; \
+    [ -f "${LIB_PATH}" ] || { echo "ERROR: install.sh no instaló la librería en ${LIB_PATH}"; exit 1; }; \
+    printf "\n✓ Librería instalada en %s\n" "${LIB_PATH}"; \
+    cp "${LIB_PATH}" /artifacts/libsqlite_native_runtime.so; \
     \
     # ── Función de descarga + verificación SHA256 ─────────────────────────── \
-    # Uso: fetch_and_verify <url-artefacto> <destino-local> \
     fetch_and_verify() { \
         URL="$1"; DEST="$2"; \
-        echo "  → Descargando $(basename ${DEST})..."; \
+        printf "  → %s\n" "$(basename "${DEST}")"; \
         curl -fsSL "${URL}"        -o "${DEST}"; \
         curl -fsSL "${URL}.sha256" -o "${DEST}.sha256"; \
         EXPECTED="$(awk '{print $1}' "${DEST}.sha256")"; \
         ACTUAL="$(sha256sum "${DEST}" | awk '{print $1}')"; \
         if [ "${ACTUAL}" != "${EXPECTED}" ]; then \
-            echo "  ✗ SHA256 mismatch para $(basename ${DEST})"; \
-            echo "    esperado : ${EXPECTED}"; \
-            echo "    obtenido : ${ACTUAL}"; \
+            printf "  ✗ SHA256 mismatch: %s\n    esperado : %s\n    obtenido : %s\n" \
+                "$(basename "${DEST}")" "${EXPECTED}" "${ACTUAL}"; \
             exit 1; \
         fi; \
-        echo "  ✓ SHA256 OK: $(basename ${DEST})"; \
+        printf "  ✓ SHA256 OK: %s\n" "$(basename "${DEST}")"; \
     }; \
     \
-    # ── Librería nativa ──────────────────────────────────────────────────── \
-    LIB="libsqlite_native_runtime-${ARCH_LABEL}.so"; \
-    fetch_and_verify "${BASE}/${LIB}" "${LIB}"; \
-    cp "${LIB}" libsqlite_native_runtime.so; \
+    printf "\n>>> Descargando y verificando JARs y binario nativo...\n"; \
     \
     # ── Thin JAR ─────────────────────────────────────────────────────────── \
-    JAR="sqlite-native-runtime-${VER}.jar"; \
-    fetch_and_verify "${BASE}/${JAR}" "${JAR}"; \
+    fetch_and_verify "${BASE}/sqlite-native-runtime-${VER}.jar" \
+                     "/artifacts/sqlite-native-runtime-${VER}.jar"; \
     \
     # ── Fat JAR ──────────────────────────────────────────────────────────── \
-    FAT="sqlite-native-runtime-${VER}-fat.jar"; \
-    fetch_and_verify "${BASE}/${FAT}" "${FAT}"; \
+    fetch_and_verify "${BASE}/sqlite-native-runtime-${VER}-fat.jar" \
+                     "/artifacts/sqlite-native-runtime-${VER}-fat.jar"; \
     \
     # ── Binario nativo pre-compilado del release ──────────────────────────── \
-    SNR_BINARY="snr-smoke-${ARCH_LABEL}"; \
-    fetch_and_verify "${BASE}/${SNR_BINARY}" "${SNR_BINARY}"; \
-    chmod +x "${SNR_BINARY}"; \
-    cp "${SNR_BINARY}" snr-smoke-prebuilt; \
+    fetch_and_verify "${BASE}/snr-smoke-${ARCH_LABEL}" \
+                     "/artifacts/snr-smoke-${ARCH_LABEL}"; \
+    chmod +x "/artifacts/snr-smoke-${ARCH_LABEL}"; \
+    cp "/artifacts/snr-smoke-${ARCH_LABEL}" /artifacts/snr-smoke-prebuilt; \
     \
-    echo; ls -lh /artifacts/
+    printf "\n>>> Artefactos listos:\n"; \
+    ls -lh /artifacts/*.so /artifacts/*.jar /artifacts/snr-smoke-prebuilt
 
-# ── Etapa 2: Pruebas en la JVM (thin JAR + fat JAR) ──────────────────────────
+# ── Etapa 2: Pruebas en la JVM ────────────────────────────────────────────────
+#
+# ghcr.io/graalvm/jdk-community:25 es multi-arch (amd64 + arm64).
+# La .so instalada por install.sh se copia a /usr/local/lib/ (ruta estándar
+# de búsqueda de la JVM) y se registra con ldconfig.
 FROM ghcr.io/graalvm/jdk-community:${GRAALVM_TAG} AS test-jvm
 
 ARG GRAALVM_TAG
 
 WORKDIR /test
 
-# Instalar la .so en la ruta estándar del sistema
-COPY --from=downloader /artifacts/libsqlite_native_runtime.so /usr/local/lib/
+COPY --from=installer /artifacts/libsqlite_native_runtime.so /usr/local/lib/
 RUN ldconfig
 
-# Copiar artefactos y fuente de la suite de tests
-COPY --from=downloader /artifacts/ /artifacts/
+COPY --from=installer /artifacts/ /artifacts/
 COPY src/Main.java ./Main.java
 
 # Compilar la suite con el thin JAR
@@ -133,46 +172,47 @@ RUN VER="$(cat /artifacts/VERSION_NUM)"; \
     javac -cp "/artifacts/sqlite-native-runtime-${VER}.jar" Main.java
 
 # ── Test 1: thin JAR ──────────────────────────────────────────────────────────
-RUN printf "\n╔══════════════════════════════════╗\n"; \
-    printf "║  Test: thin JAR  (JVM %-10s║\n" "$(java -version 2>&1 | head -1 | sed 's/.*"\(.*\)".*/\1/')"; \
-    printf "╚══════════════════════════════════╝\n\n"; \
-    VER="$(cat /artifacts/VERSION_NUM)"; \
+RUN printf "\n╔══════════════════════════════════════════╗\n" && \
+    printf   "║  Test 1/4 — JVM thin JAR                ║\n" && \
+    printf   "╚══════════════════════════════════════════╝\n\n" && \
+    VER="$(cat /artifacts/VERSION_NUM)" && \
     java --enable-native-access=ALL-UNNAMED \
          -Dsnr.test.mode=JVM-thin \
          -cp "/artifacts/sqlite-native-runtime-${VER}.jar:." \
          Main
 
-# ── Test 2: fat JAR (no recompilamos: el fat JAR ya embebe todo) ──────────────
-RUN printf "\n╔══════════════════════════════════╗\n"; \
-    printf "║  Test: fat JAR                   ║\n"; \
-    printf "╚══════════════════════════════════╝\n\n"; \
-    VER="$(cat /artifacts/VERSION_NUM)"; \
+# ── Test 2: fat JAR ───────────────────────────────────────────────────────────
+RUN printf "\n╔══════════════════════════════════════════╗\n" && \
+    printf   "║  Test 2/4 — JVM fat JAR                 ║\n" && \
+    printf   "╚══════════════════════════════════════════╝\n\n" && \
+    VER="$(cat /artifacts/VERSION_NUM)" && \
     java --enable-native-access=ALL-UNNAMED \
          -Dsnr.test.mode=JVM-fat \
          -cp "/artifacts/sqlite-native-runtime-${VER}-fat.jar:." \
          Main
 
-# Marcador de éxito — si algún RUN anterior falló, este fichero no existe
+# Marcador de éxito (la etapa test-release lo arrastra para crear dependencia)
 RUN echo "JVM tests OK" > /test/jvm-ok
 
-# ── Etapa 3: Compilar con GraalVM Native Image ────────────────────────────────
+# ── Etapa 3: GraalVM Native Image ─────────────────────────────────────────────
+#
+# ghcr.io/graalvm/native-image-community:25 incluye native-image pre-instalado.
+# Se usa --no-fallback para garantizar compilación nativa pura (sin JVM backup).
 FROM ghcr.io/graalvm/native-image-community:${GRAALVM_TAG} AS build-native
 
 ARG GRAALVM_TAG
 
 WORKDIR /build
 
-# La .so debe estar presente durante la compilación (aunque SqliteLibrary
-# se inicializa en runtime, native-image resuelve la clase en build-time)
-COPY --from=downloader /artifacts/libsqlite_native_runtime.so /usr/local/lib/
+COPY --from=installer /artifacts/libsqlite_native_runtime.so /usr/local/lib/
 RUN ldconfig
 
-COPY --from=downloader /artifacts/ /artifacts/
+COPY --from=installer /artifacts/ /artifacts/
 COPY src/Main.java ./Main.java
 
 RUN VER="$(cat /artifacts/VERSION_NUM)"; \
     JAR="/artifacts/sqlite-native-runtime-${VER}.jar"; \
-    printf "\n>>> Compilando suite como Native Image (GraalVM %s)...\n\n" "${GRAALVM_TAG}"; \
+    printf "\n>>> Compilando Main.java como Native Image (GraalVM %s)...\n\n" "${GRAALVM_TAG}"; \
     javac -cp "${JAR}" Main.java; \
     native-image \
         --initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary \
@@ -181,13 +221,15 @@ RUN VER="$(cat /artifacts/VERSION_NUM)"; \
         -H:Name=snr-release-test \
         -cp "${JAR}:." \
         Main; \
-    echo; ls -lh snr-release-test; echo
+    printf "\n>>> Binario compilado:\n"; \
+    ls -lh snr-release-test
 
 # ── Etapa 4: Ejecutar binarios nativos ────────────────────────────────────────
 #
-# Esta etapa tiene dependencia explícita de test-jvm (vía COPY --from).
-# Si test-jvm falló, esta etapa también falla aunque no haya llegado a ejecutar.
-FROM ubuntu:24.04 AS test-release
+# debian:12-slim + libstdc++6 es suficiente para ejecutar binarios GraalVM.
+# Esta etapa tiene dependencia explícita de test-jvm (COPY --from=test-jvm):
+# si test-jvm falló, el build falla aunque no llegue a este punto.
+FROM debian:12-slim AS test-release
 
 RUN apt-get update \
  && apt-get install -y --no-install-recommends libstdc++6 \
@@ -195,39 +237,36 @@ RUN apt-get update \
 
 WORKDIR /test
 
-# Instalar la .so
-COPY --from=downloader /artifacts/libsqlite_native_runtime.so /usr/local/lib/
+COPY --from=installer /artifacts/libsqlite_native_runtime.so /usr/local/lib/
 RUN ldconfig
 
-# Arrastrar el marcador de JVM — falla si test-jvm no completó con éxito
-COPY --from=test-jvm /test/jvm-ok /test/jvm-ok
-
-# Binario nativo pre-compilado del release
-COPY --from=downloader /artifacts/snr-smoke-prebuilt ./snr-smoke-prebuilt
-
-# Binario nativo compilado en esta build a partir de Main.java
-COPY --from=build-native /build/snr-release-test ./snr-release-test
+# Arrastrar el marcador: si test-jvm no completó, este COPY falla → build falla
+COPY --from=test-jvm    /test/jvm-ok              /test/jvm-ok
+COPY --from=installer   /artifacts/snr-smoke-prebuilt ./snr-smoke-prebuilt
+COPY --from=build-native /build/snr-release-test   ./snr-release-test
 
 # ── Test 3: binario nativo pre-compilado del release ─────────────────────────
-RUN printf "\n╔══════════════════════════════════╗\n"; \
-    printf "║  Test: snr-smoke (prebuilt)      ║\n"; \
-    printf "╚══════════════════════════════════╝\n\n"; \
-    ./snr-smoke-prebuilt; \
-    echo; echo "✓ snr-smoke (prebuilt release binary): OK"
+RUN printf "\n╔══════════════════════════════════════════╗\n" && \
+    printf   "║  Test 3/4 — Native Image (prebuilt)     ║\n" && \
+    printf   "╚══════════════════════════════════════════╝\n\n" && \
+    ./snr-smoke-prebuilt && \
+    printf "\n✓ snr-smoke prebuilt: OK\n"
 
 # ── Test 4: Main.java compilado como Native Image en esta build ───────────────
-RUN printf "\n╔══════════════════════════════════╗\n"; \
-    printf "║  Test: snr-release-test (native) ║\n"; \
-    printf "╚══════════════════════════════════╝\n\n"; \
-    ./snr-release-test; \
-    echo; echo "✓ Main.java native image: OK"
+RUN printf "\n╔══════════════════════════════════════════╗\n" && \
+    printf   "║  Test 4/4 — Native Image (esta build)   ║\n" && \
+    printf   "╚══════════════════════════════════════════╝\n\n" && \
+    ./snr-release-test && \
+    printf "\n✓ snr-release-test native: OK\n"
 
+# ── Resumen final ─────────────────────────────────────────────────────────────
 RUN printf "\n"; \
-    printf "══════════════════════════════════════\n"; \
-    printf "  ✓ JVM thin JAR  — OK (etapa 2)\n"; \
-    printf "  ✓ JVM fat JAR   — OK (etapa 2)\n"; \
-    printf "  ✓ Native prebuilt release — OK\n"; \
-    printf "  ✓ Native image build      — OK\n"; \
-    printf "══════════════════════════════════════\n"; \
-    printf "  TODOS LOS TESTS PASARON ✓\n"; \
-    printf "══════════════════════════════════════\n\n"
+    printf "╔══════════════════════════════════════════╗\n"; \
+    printf "║           RESULTADO FINAL                ║\n"; \
+    printf "╠══════════════════════════════════════════╣\n"; \
+    printf "║  ✓ install.sh del release    — OK        ║\n"; \
+    printf "║  ✓ JVM + thin JAR            — OK        ║\n"; \
+    printf "║  ✓ JVM + fat JAR             — OK        ║\n"; \
+    printf "║  ✓ Native Image prebuilt     — OK        ║\n"; \
+    printf "║  ✓ Native Image (esta build) — OK        ║\n"; \
+    printf "╚══════════════════════════════════════════╝\n\n"

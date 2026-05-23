@@ -1,0 +1,96 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# verify-release.yml — Verifica los artefactos del GitHub Release
+#
+# Dispara automáticamente cuando el workflow "Release" completa con éxito,
+# garantizando que todos los artefactos publicados funcionan correctamente
+# antes de considerarlos estables.
+#
+# También puede ejecutarse manualmente para re-verificar un release existente:
+#   Actions → Verify Release → Run workflow → introducir el tag (ej. v0.1.1)
+#
+# Qué valida (para cada arquitectura):
+#   1. install.sh del release   — el script de instalación publicado funciona
+#   2. thin JAR + JVM           — API Java completa sobre la .so instalada
+#   3. fat JAR + JVM            — mismo test, JAR standalone sin dependencias
+#   4. snr-smoke prebuilt       — binario nativo pre-compilado del release
+#   5. Native Image (build)     — compilación de Main.java con native-image 25
+#
+# Grafo de ejecución:
+#   Release (workflow) ──→ verify [amd64 / arm64]  (matrix, runners nativos)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Verify Release
+
+on:
+  # Dispara cuando el workflow "Release" termina (exitosamente o con fallo).
+  # El job tiene un 'if' que lo omite si el Release falló.
+  workflow_run:
+    workflows: ["Release"]
+    types: [completed]
+
+  # Permite re-verificar manualmente un release existente.
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag del release a verificar (ej. v0.1.1). Vacío = último release.'
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  # En workflow_run: head_branch es el tag que disparó el Release (ej. v0.1.1).
+  # En workflow_dispatch con tag explícito: usa el input.
+  # En workflow_dispatch sin tag: usa "latest" (último release publicado).
+  SNR_VERSION: ${{ inputs.tag || github.event.workflow_run.head_branch || 'latest' }}
+
+jobs:
+
+  verify:
+    name: "🔍 Verify ${{ env.SNR_VERSION }} (${{ matrix.arch }})"
+    runs-on: ${{ matrix.runner }}
+
+    # Solo ejecutar si el Release fue exitoso (no aplica en workflow_dispatch)
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      github.event.workflow_run.conclusion == 'success'
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      # Checkout de main para obtener el Dockerfile y la suite de tests.
+      # Los artefactos se descargan en tiempo de build desde el GitHub Release,
+      # por lo que el ref del checkout no afecta a qué versión se verifica.
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: "Mostrar configuración"
+        run: |
+          echo "Release a verificar : ${{ env.SNR_VERSION }}"
+          echo "Arquitectura        : ${{ matrix.arch }}"
+          echo "Runner              : ${{ matrix.runner }}"
+          echo "Docker version      : $(docker --version)"
+
+      # docker build sin --platform usa el runner nativo → TARGETARCH se infiere
+      # de uname -m en el Dockerfile (no requiere buildx ni QEMU).
+      - name: "Build y test de artefactos del release"
+        run: |
+          docker build \
+            --build-arg SNR_VERSION="${{ env.SNR_VERSION }}" \
+            --progress=plain \
+            --target test-release \
+            containers/test-release/
+
+      - name: "✅ Release verificado"
+        run: |
+          echo "Los artefactos del release ${{ env.SNR_VERSION }}"
+          echo "han sido verificados correctamente en ${{ matrix.arch }}."

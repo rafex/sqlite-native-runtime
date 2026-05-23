@@ -40,12 +40,13 @@ BUILDER="$("${CONTAINER_ENGINE}" buildx inspect --bootstrap 2>/dev/null | grep -
 if echo "${PLATFORM}" | grep -q ","; then
     # Multi-arch: necesita un builder con soporte QEMU o runners nativos
     if ! "${CONTAINER_ENGINE}" buildx inspect --bootstrap 2>/dev/null | grep -q "linux/arm64"; then
-        warn "El builder activo no soporta linux/arm64."
-        warn "Para pruebas multi-arch locales crea un builder con QEMU:"
+        warn "El builder activo no soporta linux/arm64 (necesario para multi-arch local)."
+        warn "Para habilitar emulación QEMU:"
         echo ""
         echo "    docker buildx create --name multiarch --use"
         echo "    docker run --privileged --rm tonistiigi/binfmt --install all"
         echo ""
+        warn "En CI se usan runners nativos (ubuntu-latest / ubuntu-24.04-arm)."
         warn "Continuando con platform=${PLATFORM} de todas formas..."
     fi
 fi
