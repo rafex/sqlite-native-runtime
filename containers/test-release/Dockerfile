@@ -221,7 +221,7 @@ RUN VER="$(cat /artifacts/VERSION_NUM)"; \
     printf "\n>>> Compilando Main.java como Native Image (GraalVM %s)...\n\n" "${GRAALVM_TAG}"; \
     javac --enable-preview --release 21 -cp "${JAR}" Main.java; \
     native-image \
-        --initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary \
+        --initialize-at-run-time=mx.rafex.ether.sqlite.SqliteLibrary \
         --enable-native-access=ALL-UNNAMED \
         --enable-preview \
         --no-fallback \

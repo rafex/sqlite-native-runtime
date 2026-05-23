@@ -1,4 +1,4 @@
-package mx.rafex.sqlite;
+package mx.rafex.ether.sqlite;
 
 import org.junit.jupiter.api.*;
 import org.junit.jupiter.api.io.TempDir;

@@ -1,4 +1,4 @@
-package mx.rafex.sqlite;
+package mx.rafex.ether.sqlite;
 
 /**
  * Test de humo — ejecutar con:
@@ -6,7 +6,7 @@ package mx.rafex.sqlite;
  * <pre>
  *   ETHER_SQLITE_LIB=/path/to/libether_sqlite_runtime.dylib \
  *   java --enable-native-access=ALL-UNNAMED -cp target/classes:target/test-classes \
- *        mx.rafex.sqlite.SmokeTest
+ *        mx.rafex.ether.sqlite.SmokeTest
  * </pre>
  */
 public class SmokeTest {

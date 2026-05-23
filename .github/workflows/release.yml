@@ -15,10 +15,10 @@
 #   ether-sqlite-runtime-{version}.jar.sha256
 #   ether-sqlite-runtime-{version}-fat.jar          ← Java 25 fat JAR
 #   ether-sqlite-runtime-{version}-fat.jar.sha256
-#   ether-sqlite-runtime-{version}-java21.jar       ← Java 21 thin JAR (--enable-preview)
-#   ether-sqlite-runtime-{version}-java21.jar.sha256
-#   ether-sqlite-runtime-{version}-java21-fat.jar   ← Java 21 fat JAR (--enable-preview)
-#   ether-sqlite-runtime-{version}-java21-fat.jar.sha256
+#   ether-sqlite-java21-runtime-{version}.jar     ← Java 21 thin JAR (--enable-preview)
+#   ether-sqlite-java21-runtime-{version}.jar.sha256
+#   ether-sqlite-java21-runtime-{version}-fat.jar ← Java 21 fat JAR (--enable-preview)
+#   ether-sqlite-java21-runtime-{version}-fat.jar.sha256
 #
 #   ether-sqlite-linux-amd64.bin                            ← GraalVM Native Image Java 25, x86_64
 #   ether-sqlite-linux-amd64.bin.sha256
@@ -203,31 +203,31 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-java21-${{ hashFiles('sqlite-native-runtime/java/ether-sqlite/pom.xml') }}
+          key: ${{ runner.os }}-maven-java21-${{ hashFiles('sqlite-native-runtime/java/ether-sqlite-java21/pom.xml') }}
           restore-keys: ${{ runner.os }}-maven-java21-
 
       - name: Set pom.xml version from tag
-        working-directory: sqlite-native-runtime/java/ether-sqlite
+        working-directory: sqlite-native-runtime/java/ether-sqlite-java21
         run: |
           VERSION="${RELEASE_TAG#v}"
           ./mvnw versions:set -DnewVersion="${VERSION}" -DgenerateBackupPoms=false \
             --no-transfer-progress -q
 
-      # Perfil java21: src/main/java21, --release 21, --enable-preview
-      # Produce: ether-sqlite-runtime-{version}-java21.jar (finalName override)
-      #          ether-sqlite-runtime-{version}-java21-fat.jar
+      # Módulo ether-sqlite-java21: --release 21, --enable-preview ya definidos en pom.xml
+      # Produce: ether-sqlite-java21-runtime-{version}.jar
+      #          ether-sqlite-java21-runtime-{version}-fat.jar
       - name: Build Java 21 thin JAR + fat JAR
-        working-directory: sqlite-native-runtime/java/ether-sqlite
-        run: ./mvnw -Pjava21 package -DskipTests --no-transfer-progress
+        working-directory: sqlite-native-runtime/java/ether-sqlite-java21
+        run: ./mvnw package -DskipTests --no-transfer-progress
 
       - name: Collect artifacts
         run: |
           mkdir -p dist
           VERSION="${RELEASE_TAG#v}"
-          cp "sqlite-native-runtime/java/ether-sqlite/target/ether-sqlite-runtime-${VERSION}-java21.jar" \
-             "dist/ether-sqlite-runtime-${VERSION}-java21.jar"
-          cp "sqlite-native-runtime/java/ether-sqlite/target/ether-sqlite-runtime-${VERSION}-java21-fat.jar" \
-             "dist/ether-sqlite-runtime-${VERSION}-java21-fat.jar"
+          cp "sqlite-native-runtime/java/ether-sqlite-java21/target/ether-sqlite-java21-runtime-${VERSION}.jar" \
+             "dist/ether-sqlite-java21-runtime-${VERSION}.jar"
+          cp "sqlite-native-runtime/java/ether-sqlite-java21/target/ether-sqlite-java21-runtime-${VERSION}-fat.jar" \
+             "dist/ether-sqlite-java21-runtime-${VERSION}-fat.jar"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -282,7 +282,7 @@ jobs:
       - name: Build GraalVM Native Image (Java 25)
         working-directory: sqlite-native-runtime/java/ether-sqlite
         env:
-          SNR_LIB: ${{ github.workspace }}/dist/${{ matrix.lib }}
+          ETHER_SQLITE_LIB: ${{ github.workspace }}/dist/${{ matrix.lib }}
         run: ./mvnw -Pnative package native:compile -DskipTests --no-transfer-progress
 
       - name: Collect artifact
@@ -341,20 +341,20 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: ${{ matrix.runner }}-maven-java21-${{ hashFiles('sqlite-native-runtime/java/ether-sqlite/pom.xml') }}
+          key: ${{ matrix.runner }}-maven-java21-${{ hashFiles('sqlite-native-runtime/java/ether-sqlite-java21/pom.xml') }}
           restore-keys: ${{ matrix.runner }}-maven-java21-
 
-      # Perfiles java21 + native-java21: Java 21 preview, --enable-preview en AOT
+      # Módulo ether-sqlite-java21: perfil native compila con --enable-preview (AOT)
       - name: Build GraalVM Native Image (Java 21 preview)
-        working-directory: sqlite-native-runtime/java/ether-sqlite
+        working-directory: sqlite-native-runtime/java/ether-sqlite-java21
         env:
-          SNR_LIB: ${{ github.workspace }}/dist/${{ matrix.lib }}
-        run: ./mvnw -Pjava21,native-java21 package native:compile -DskipTests --no-transfer-progress
+          ETHER_SQLITE_LIB: ${{ github.workspace }}/dist/${{ matrix.lib }}
+        run: ./mvnw -Pnative package native:compile -DskipTests --no-transfer-progress
 
       - name: Collect artifact
         run: |
           mkdir -p out
-          cp sqlite-native-runtime/java/ether-sqlite/target/ether-sqlite-java21 out/${{ matrix.binary }}
+          cp sqlite-native-runtime/java/ether-sqlite-java21/target/ether-sqlite-java21 out/${{ matrix.binary }}
           chmod +x out/${{ matrix.binary }}
 
       - uses: actions/upload-artifact@v4

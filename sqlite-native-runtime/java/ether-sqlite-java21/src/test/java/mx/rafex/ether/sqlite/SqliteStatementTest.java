@@ -1,4 +1,4 @@
-package mx.rafex.sqlite;
+package mx.rafex.ether.sqlite;
 
 import java.lang.foreign.MemorySegment;
 import org.junit.jupiter.api.AfterEach;

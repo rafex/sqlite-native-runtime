@@ -1,4 +1,4 @@
-package mx.rafex.sqlite;
+package mx.rafex.ether.sqlite;
 
 /**
  * Excepción lanzada por {@link SqliteConnection} y {@link SqliteStatement}

@@ -1,4 +1,4 @@
-package mx.rafex.sqlite;
+package mx.rafex.ether.sqlite;
 
 import java.lang.foreign.AddressLayout;
 import java.lang.foreign.Arena;
@@ -27,7 +27,7 @@ import java.util.List;
  *
  * <h2>GraalVM Native Image</h2>
  * <pre>
- *   --initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary
+ *   --initialize-at-run-time=mx.rafex.ether.sqlite.SqliteLibrary
  *   --enable-native-access=ALL-UNNAMED
  * </pre>
  *

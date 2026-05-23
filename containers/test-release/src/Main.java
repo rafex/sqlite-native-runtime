@@ -1,5 +1,5 @@
-import mx.rafex.sqlite.SqliteConnection;
-import mx.rafex.sqlite.SqliteException;
+import mx.rafex.ether.sqlite.SqliteConnection;
+import mx.rafex.ether.sqlite.SqliteException;
 
 import java.io.File;
 import java.nio.file.Files;
