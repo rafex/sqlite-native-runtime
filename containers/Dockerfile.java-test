@@ -73,10 +73,12 @@ COPY --from=rust-builder \
 
 ENV ETHER_SQLITE_LIB=/usr/local/lib/libether_sqlite_runtime.so
 
-# TT-3 : unit tests (JaCoCo ≥ 99% LINE)
+# TT-3 : unit tests
 # TT-3i: integration tests @Tag("integration")
-RUN ./mvnw test --no-transfer-progress \
- && ./mvnw test -Pintegration --no-transfer-progress
+# JaCoCo se omite aquí: el Docker CI verifica que los tests pasan,
+# no genera reportes de cobertura (se ejecutan en CI dedicado con mvn verify).
+RUN ./mvnw test -Djacoco.skip=true --no-transfer-progress \
+ && ./mvnw test -Pintegration -Djacoco.skip=true --no-transfer-progress
 
 # ── Etapa 3: Tests Java 21 (Panama FFM preview, --enable-preview) ─────────────
 #
@@ -102,9 +104,9 @@ COPY --from=rust-builder \
 
 ENV ETHER_SQLITE_LIB=/usr/local/lib/libether_sqlite_runtime.so
 
-# --enable-preview ya configurado en pom.xml de ether-sqlite-java21
-RUN ./mvnw test --no-transfer-progress \
- && ./mvnw test -Pintegration --no-transfer-progress
+# enable-preview ya configurado en pom.xml de ether-sqlite-java21
+RUN ./mvnw test -Djacoco.skip=true --no-transfer-progress \
+ && ./mvnw test -Pintegration -Djacoco.skip=true --no-transfer-progress
 
 # ── Etapa final: arrastra ambas etapas de test ────────────────────────────────
 
