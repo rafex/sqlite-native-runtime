@@ -5,6 +5,11 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ## [Unreleased]
 
+## [v0.3.2] — 2026-05-23
+
+### 🔀 Otros cambios
+- fix
+
 ## [v0.3.1] — 2026-05-23
 
 ### 🐛 Correcciones
