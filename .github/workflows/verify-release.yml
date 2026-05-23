@@ -25,18 +25,17 @@ on:
 permissions:
   contents: read
 
-env:
-  # head_branch en un workflow_run disparado por push de tag = el tag (ej. v0.1.1)
-  SNR_VERSION: ${{ github.event.workflow_run.head_branch }}
-
 jobs:
 
   verify:
-    name: "🔍 Verify ${{ env.SNR_VERSION }} (${{ matrix.arch }})"
+    # Nota: el contexto 'env' NO está disponible en job.name (solo github, matrix,
+    # needs, vars, inputs). Se usa github.event.workflow_run.head_branch directamente.
+    name: "🔍 Verify ${{ github.event.workflow_run.head_branch }} (${{ matrix.arch }})"
     runs-on: ${{ matrix.runner }}
 
-    # Solo ejecutar si el Release completó con éxito
-    if: github.event.workflow_run.conclusion == 'success'
+    # Solo ejecutar si el Release completó con éxito.
+    # La expresión debe ir entre ${{ }} para evitar ambigüedad de parseo YAML.
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
 
     strategy:
       fail-fast: false
@@ -57,7 +56,7 @@ jobs:
 
       - name: "Mostrar configuración"
         run: |
-          echo "Release a verificar : ${{ env.SNR_VERSION }}"
+          echo "Release a verificar : ${{ github.event.workflow_run.head_branch }}"
           echo "Arquitectura        : ${{ matrix.arch }}"
           echo "Runner              : ${{ matrix.runner }}"
           echo "Docker version      : $(docker --version)"
@@ -67,12 +66,12 @@ jobs:
       - name: "Build y test de artefactos del release"
         run: |
           docker build \
-            --build-arg SNR_VERSION="${{ env.SNR_VERSION }}" \
+            --build-arg SNR_VERSION="${{ github.event.workflow_run.head_branch }}" \
             --progress=plain \
             --target test-release \
             containers/test-release/
 
       - name: "✅ Release verificado"
         run: |
-          echo "Los artefactos del release ${{ env.SNR_VERSION }}"
+          echo "Los artefactos del release ${{ github.event.workflow_run.head_branch }}"
           echo "han sido verificados correctamente en ${{ matrix.arch }}."
