@@ -5,6 +5,14 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ## [Unreleased]
 
+## [v0.1.1] — 2026-05-22
+
+### 🐛 Correcciones
+- workflow_dispatch + RELEASE_TAG unificado + checkout con ref explícito
+
+### 🔧 Mantenimiento
+- sistema de release con CHANGE.md, RELEASE.md y scripts tag-create/tag-push
+
 ## [v0.1.0] — 2026-05-22
 
 ### ✨ Nuevas funcionalidades
