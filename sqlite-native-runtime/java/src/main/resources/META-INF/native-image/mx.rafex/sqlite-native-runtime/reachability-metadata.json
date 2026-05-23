@@ -1,0 +1,56 @@
+{
+  "foreign": [
+    {
+      "type": "downcall",
+      "descriptor": "()long"
+    },
+    {
+      "type": "downcall",
+      "descriptor": "(long)void"
+    },
+    {
+      "type": "downcall",
+      "descriptor": "(long)long"
+    },
+    {
+      "type": "downcall",
+      "descriptor": "(long)int"
+    },
+    {
+      "type": "downcall",
+      "descriptor": "(long,int)long"
+    },
+    {
+      "type": "downcall",
+      "descriptor": "(long,int)int"
+    },
+    {
+      "type": "downcall",
+      "descriptor": "(long,int)double"
+    },
+    {
+      "type": "downcall",
+      "descriptor": "(long,long)int"
+    },
+    {
+      "type": "downcall",
+      "descriptor": "(long,long)long"
+    },
+    {
+      "type": "downcall",
+      "descriptor": "(long,int,long)int"
+    },
+    {
+      "type": "downcall",
+      "descriptor": "(long,int,double)int"
+    },
+    {
+      "type": "downcall",
+      "descriptor": "(long,int,long,int)int"
+    },
+    {
+      "type": "downcall",
+      "descriptor": "(long,long,int,long,long)int"
+    }
+  ]
+}
