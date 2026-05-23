@@ -4,6 +4,17 @@ Biblioteca SQLite genérica para Java 22+ y GraalVM 25 Native Image.
 **Rust** expone la C ABI completa de SQLite vía `libsqlite3-sys`.  
 **Java** la consume con Panama FFI (`java.lang.foreign.*`, JEP 454 — estable desde Java 22) — sin JNI, sin extracción de JARs.
 
+## Instalación rápida
+
+```sh
+curl -sS https://raw.githubusercontent.com/rafex/sqlite-native-runtime/main/scripts/release/install.sh | sh
+```
+
+El script detecta automáticamente la arquitectura (x86\_64 / aarch64) y el modo de instalación (sistema con `sudo` o usuario en `~/.local/lib/`).  
+Para más opciones consulta la [guía de instalación completa](docs/INSTALL.md).
+
+> **Guías**: [Instalación](docs/INSTALL.md) · [Uso y API](docs/USAGE.md)
+
 ## Arquitectura
 
 ```
@@ -45,36 +56,29 @@ make package      # genera JAR en java/target/
 
 ## Uso
 
-### Dependencia Maven (instalación local)
+### Dependencia Maven
+
+Descarga el JAR del [último release](https://github.com/rafex/sqlite-native-runtime/releases/latest) e instálalo en tu repositorio local:
 
 ```bash
-make package
 mvn install:install-file \
-  -Dfile=sqlite-native-runtime/java/target/sqlite-native-runtime-0.1.0.jar \
+  -Dfile=sqlite-native-runtime-0.1.1.jar \
   -DgroupId=mx.rafex -DartifactId=sqlite-native-runtime \
-  -Dversion=0.1.0 -Dpackaging=jar
+  -Dversion=0.1.1 -Dpackaging=jar
 ```
 
 ```xml
 <dependency>
   <groupId>mx.rafex</groupId>
   <artifactId>sqlite-native-runtime</artifactId>
-  <version>0.1.0</version>
+  <version>0.1.1</version>
 </dependency>
 ```
 
-### Localización de la librería nativa
+Panama FFM requiere el flag de JVM:
 
-Java busca la librería en este orden:
-
-1. Propiedad de sistema `snr.lib`
-2. Variable de entorno `SNR_LIB`
-3. Rutas por defecto: `/usr/local/lib/`, `/opt/snr/lib/`, directorio de trabajo
-
-```bash
-java --enable-native-access=ALL-UNNAMED \
-     -Dsnr.lib=/ruta/a/libsqlite_native_runtime.dylib \
-     -jar mi-app.jar
+```
+--enable-native-access=ALL-UNNAMED
 ```
 
 ### API básica
@@ -97,27 +101,10 @@ try (var db = SqliteConnection.open("/data/app.db")) {
     }
 
     db.transaction(() -> db.exec("UPDATE items SET val = val * 2"));
-
-    db.withSavepoint("sp1", () -> db.exec("DELETE FROM items WHERE val < 1"));
 }
 ```
 
-### WAL + checkpoint
-
-```java
-db.enableWal();                                              // journal_mode=WAL + synchronous=NORMAL
-db.walCheckpoint(SqliteConnection.WalMode.TRUNCATE, null);
-db.walAutocheckpoint(1000);
-```
-
-### Parámetros con nombre
-
-```java
-try (var q = db.prepare("SELECT * FROM items WHERE name = :n")) {
-    q.bindText(q.parameterIndex(":n"), "alfa");
-    while (q.step()) { ... }
-}
-```
+Ver [docs/USAGE.md](docs/USAGE.md) para la guía completa de API (transacciones, savepoints, WAL, virtual threads, GraalVM Native Image).
 
 ## GraalVM Native Image
 

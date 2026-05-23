@@ -305,4 +305,5 @@ jobs:
           gh release create "${RELEASE_TAG}" \
             --title "Release ${RELEASE_TAG}" \
             --notes-file "${NOTES_FILE}" \
-            artifacts/*
+            artifacts/* \
+            scripts/release/install.sh

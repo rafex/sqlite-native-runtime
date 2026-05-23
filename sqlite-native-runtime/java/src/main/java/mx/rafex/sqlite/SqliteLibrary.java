@@ -518,10 +518,17 @@ public final class SqliteLibrary {
             candidates.add(Path.of(explicit));
         }
 
-        // macOS
+        // Rutas de usuario (XDG) — instalación sin sudo via el script de instalación
+        var home = System.getProperty("user.home", "");
+        if (!home.isBlank()) {
+            candidates.add(Path.of(home, ".local", "lib", "libsqlite_native_runtime.dylib"));
+            candidates.add(Path.of(home, ".local", "lib", "libsqlite_native_runtime.so"));
+        }
+        // macOS — rutas del sistema
         candidates.add(Path.of("/usr/local/lib/libsqlite_native_runtime.dylib"));
         candidates.add(Path.of("/opt/snr/lib/libsqlite_native_runtime.dylib"));
-        // Linux
+        candidates.add(Path.of("/opt/homebrew/lib/libsqlite_native_runtime.dylib"));
+        // Linux — rutas del sistema
         candidates.add(Path.of("/usr/local/lib/libsqlite_native_runtime.so"));
         candidates.add(Path.of("/opt/snr/lib/libsqlite_native_runtime.so"));
         // Directorio de trabajo — solo para desarrollo local (I-1).
