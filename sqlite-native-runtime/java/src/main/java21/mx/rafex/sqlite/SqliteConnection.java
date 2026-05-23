@@ -394,7 +394,7 @@ public final class SqliteConnection implements AutoCloseable {
             closed = true;
             int open = openStatements.get();
             if (open > 0) {
-                LOG.warning("[snr] conexión cerrada con " + open
+                LOG.warning("[esr] conexión cerrada con " + open
                     + " statement(s) aún abiertos — posible resource leak. "
                     + "Cierra siempre los SqliteStatement antes de SqliteConnection.");
             }

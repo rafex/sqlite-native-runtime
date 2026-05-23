@@ -36,10 +36,10 @@ CARGO="${HOME}/.rustup/toolchains/${CARGO_TOOLCHAIN}/bin/cargo"
 RUSTC="${HOME}/.rustup/toolchains/${CARGO_TOOLCHAIN}/bin/rustc"
 CARGO_BIN="${HOME}/.rustup/toolchains/${CARGO_TOOLCHAIN}/bin"
 
-SNR_LIB="${ROOT}/sqlite-native-runtime/rust/target/release/libsqlite_native_runtime.dylib"
+ETHER_SQLITE_LIB="${ROOT}/sqlite-native-runtime/rust/target/release/libether_sqlite_runtime.dylib"
 
 # ── Exportar todo ─────────────────────────────────────────────────────────────
 export ROOT
 export GRAALVM_HOME CARGO_TOOLCHAIN CONTAINER_ENGINE GLIBC_MIN
 export JAVA_DIR RUST_DIR CONTAINERS_DIR
-export CARGO RUSTC CARGO_BIN SNR_LIB
+export CARGO RUSTC CARGO_BIN ETHER_SQLITE_LIB

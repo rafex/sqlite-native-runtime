@@ -6,12 +6,12 @@
   <modelVersion>4.0.0</modelVersion>
 
   <groupId>mx.rafex</groupId>
-  <artifactId>sqlite-native-runtime</artifactId>
+  <artifactId>ether-sqlite-runtime</artifactId>
   <version>0.1.0</version>
   <packaging>jar</packaging>
 
-  <name>sqlite-native-runtime</name>
-  <description>Binding Panama FFI para libsqlite_native_runtime — Java 25 stable (JEP 454) y Java 21 preview (JEP 442)</description>
+  <name>ether-sqlite-runtime</name>
+  <description>Binding Panama FFI para libether_sqlite_runtime — Java 25 stable (JEP 454) y Java 21 preview (JEP 442)</description>
 
   <properties>
     <!--
@@ -141,8 +141,8 @@
         Fat JAR (uber-jar): empaqueta todas las dependencias de runtime en un único JAR
         autónomo. shadedArtifactAttached=true conserva el JAR delgado original intacto
         y adjunta el fat JAR con el clasificador "fat":
-          sqlite-native-runtime-{version}.jar      ← thin JAR (para Maven/Gradle)
-          sqlite-native-runtime-{version}-fat.jar  ← fat JAR (distribución standalone)
+          ether-sqlite-runtime-{version}.jar      ← thin JAR (para Maven/Gradle)
+          ether-sqlite-runtime-{version}-fat.jar  ← fat JAR (distribución standalone)
         Actualmente no hay dependencias de runtime, pero la configuración es correcta
         para el futuro y garantiza que el artefacto de release sea explícito.
       -->
@@ -203,7 +203,7 @@
     <!--
       Perfil native: compila el smoke test como ejecutable nativo con GraalVM 25.
       Uso: JAVA_HOME=graalvm-25 mvn -Pnative package native:compile
-      Binario resultante: target/snr-smoke
+      Binario resultante: target/ether-sqlite
     -->
     <profile>
       <id>native</id>
@@ -215,7 +215,7 @@
             <version>${native.maven.plugin.version}</version>
             <extensions>true</extensions>
             <configuration>
-              <imageName>snr-smoke</imageName>
+              <imageName>ether-sqlite</imageName>
               <!-- SmokeTest como punto de entrada para verificar la libreria como native image -->
               <mainClass>mx.rafex.sqlite.SmokeTest</mainClass>
               <buildArgs>
@@ -239,8 +239,8 @@
       solo puede ejecutarse en Java 21 JVM con --enable-preview.
 
       Fuentes: src/main/java21 (usa allocateUtf8String, getUtf8String — API Java 21 preview).
-      Artefacto: sqlite-native-runtime-{version}-java21.jar
-                 sqlite-native-runtime-{version}-java21-fat.jar
+      Artefacto: ether-sqlite-runtime-{version}-java21.jar
+                 ether-sqlite-runtime-{version}-java21-fat.jar
 
       Uso: mvn -Pjava21 package
     -->
@@ -301,7 +301,7 @@
     </profile>
 
     <!--
-      Perfil native-java21: compila snr-smoke-java21 con GraalVM 25 native-image
+      Perfil native-java21: compila ether-sqlite-java21 con GraalVM 25 native-image
       a partir de fuentes Java 21 preview (--enable-preview).
 
       Uso: mvn -Pjava21,native-java21 package native:compile
@@ -316,7 +316,7 @@
             <version>${native.maven.plugin.version}</version>
             <extensions>true</extensions>
             <configuration>
-              <imageName>snr-smoke-java21</imageName>
+              <imageName>ether-sqlite-java21</imageName>
               <mainClass>mx.rafex.sqlite.SmokeTest</mainClass>
               <buildArgs>
                 <buildArg>--initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary</buildArg>

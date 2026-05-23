@@ -20,7 +20,7 @@
 #
 #   # Versión específica en una sola arquitectura:
 #   docker buildx build --platform linux/amd64 \
-#     --build-arg SNR_VERSION=v0.1.1 \
+#     --build-arg ETHER_SQLITE_VERSION=v0.1.1 \
 #     --progress=plain --target test-release containers/test-release/
 #
 # Uso en CI (via just o el workflow verify-release.yml):
@@ -28,11 +28,11 @@
 #   just test-release v0.1.1           ← versión específica
 #
 # Variables:
-#   SNR_VERSION   versión del release a probar (default: latest)
+#   ETHER_SQLITE_VERSION   versión del release a probar (default: latest)
 #   GRAALVM_TAG   tag de las imágenes GraalVM (default: 25)
 # ─────────────────────────────────────────────────────────────────────────────
 
-ARG SNR_VERSION=latest
+ARG ETHER_SQLITE_VERSION=latest
 # JVM tag para las pruebas: debe ser Java 21 (el JAR lleva bytecode preview 21.0xFFFF)
 ARG JVM_TAG=21
 # GraalVM tag para la compilacion de Native Image (requiere native-image tool)
@@ -46,7 +46,7 @@ ARG GRAALVM_TAG=25
 # que el script publicado funciona correctamente.
 #
 # Sin sudo disponible en el contenedor, install.sh usa modo usuario:
-#   → /root/.local/lib/libsqlite_native_runtime.so
+#   → /root/.local/lib/libether_sqlite_runtime.so
 # Las etapas siguientes copian la .so a /usr/local/lib/ donde la JVM la
 # encontrará automáticamente.
 #
@@ -55,7 +55,7 @@ ARG GRAALVM_TAG=25
 # desde uname -m como fallback (el mismo mecanismo que usa install.sh).
 FROM debian:12-slim AS installer
 
-ARG SNR_VERSION
+ARG ETHER_SQLITE_VERSION
 ARG TARGETARCH
 
 RUN apt-get update \
@@ -70,14 +70,14 @@ RUN set -e; \
     DL="https://github.com/${REPO}/releases/download"; \
     \
     # ── Resolver versión ─────────────────────────────────────────────────── \
-    if [ "${SNR_VERSION}" = "latest" ]; then \
+    if [ "${ETHER_SQLITE_VERSION}" = "latest" ]; then \
         VERSION="$(curl -fsSL "${API}/latest" \
             | grep '"tag_name"' \
             | sed 's/.*"tag_name":[[:space:]]*"\([^"]*\)".*/\1/' \
             | tr -d '[:space:]')"; \
         [ -n "${VERSION}" ] || { echo "ERROR: no se pudo obtener la versión"; exit 1; }; \
     else \
-        VERSION="${SNR_VERSION}"; \
+        VERSION="${ETHER_SQLITE_VERSION}"; \
     fi; \
     echo "${VERSION}"   > /artifacts/VERSION; \
     echo "${VERSION#v}" > /artifacts/VERSION_NUM; \
@@ -105,18 +105,18 @@ RUN set -e; \
     \
     # ── install.sh del release — valida el script de instalación publicado ── \
     # Descarga el install.sh desde los assets del release (no del repo),       \
-    # lo ejecuta con SNR_VERSION fijado para instalar exactamente esta versión. \
+    # lo ejecuta con ETHER_SQLITE_VERSION fijado para instalar exactamente esta versión. \
     # Sin sudo en el contenedor → modo usuario → /root/.local/lib/             \
     printf ">>> Ejecutando install.sh del release %s...\n" "${VERSION}"; \
     curl -fsSL "${BASE}/install.sh" -o /tmp/install.sh; \
     chmod +x /tmp/install.sh; \
-    SNR_VERSION="${VERSION}" sh /tmp/install.sh; \
+    ETHER_SQLITE_VERSION="${VERSION}" sh /tmp/install.sh; \
     \
     # Verificar que la librería quedó instalada correctamente \
-    LIB_PATH="/root/.local/lib/libsqlite_native_runtime.so"; \
+    LIB_PATH="/root/.local/lib/libether_sqlite_runtime.so"; \
     [ -f "${LIB_PATH}" ] || { echo "ERROR: install.sh no instaló la librería en ${LIB_PATH}"; exit 1; }; \
     printf "\n✓ Librería instalada en %s\n" "${LIB_PATH}"; \
-    cp "${LIB_PATH}" /artifacts/libsqlite_native_runtime.so; \
+    cp "${LIB_PATH}" /artifacts/libether_sqlite_runtime.so; \
     \
     # ── Función de descarga + verificación SHA256 ─────────────────────────── \
     fetch_and_verify() { \
@@ -137,21 +137,21 @@ RUN set -e; \
     printf "\n>>> Descargando y verificando JARs y binario nativo...\n"; \
     \
     # ── Thin JAR ─────────────────────────────────────────────────────────── \
-    fetch_and_verify "${BASE}/sqlite-native-runtime-${VER}.jar" \
-                     "/artifacts/sqlite-native-runtime-${VER}.jar"; \
+    fetch_and_verify "${BASE}/ether-sqlite-runtime-${VER}.jar" \
+                     "/artifacts/ether-sqlite-runtime-${VER}.jar"; \
     \
     # ── Fat JAR ──────────────────────────────────────────────────────────── \
-    fetch_and_verify "${BASE}/sqlite-native-runtime-${VER}-fat.jar" \
-                     "/artifacts/sqlite-native-runtime-${VER}-fat.jar"; \
+    fetch_and_verify "${BASE}/ether-sqlite-runtime-${VER}-fat.jar" \
+                     "/artifacts/ether-sqlite-runtime-${VER}-fat.jar"; \
     \
     # ── Binario nativo pre-compilado del release ──────────────────────────── \
-    fetch_and_verify "${BASE}/snr-smoke-${ARCH_LABEL}" \
-                     "/artifacts/snr-smoke-${ARCH_LABEL}"; \
-    chmod +x "/artifacts/snr-smoke-${ARCH_LABEL}"; \
-    cp "/artifacts/snr-smoke-${ARCH_LABEL}" /artifacts/snr-smoke-prebuilt; \
+    fetch_and_verify "${BASE}/ether-sqlite-${ARCH_LABEL}.bin" \
+                     "/artifacts/ether-sqlite-${ARCH_LABEL}.bin"; \
+    chmod +x "/artifacts/ether-sqlite-${ARCH_LABEL}.bin"; \
+    cp "/artifacts/ether-sqlite-${ARCH_LABEL}.bin" /artifacts/ether-sqlite-prebuilt; \
     \
     printf "\n>>> Artefactos listos:\n"; \
-    ls -lh /artifacts/*.so /artifacts/*.jar /artifacts/snr-smoke-prebuilt
+    ls -lh /artifacts/*.so /artifacts/*.jar /artifacts/ether-sqlite-prebuilt
 
 # ── Etapa 2: Pruebas en la JVM ────────────────────────────────────────────────
 #
@@ -164,7 +164,7 @@ ARG JVM_TAG
 
 WORKDIR /test
 
-COPY --from=installer /artifacts/libsqlite_native_runtime.so /usr/local/lib/
+COPY --from=installer /artifacts/libether_sqlite_runtime.so /usr/local/lib/
 RUN ldconfig
 
 COPY --from=installer /artifacts/ /artifacts/
@@ -172,7 +172,7 @@ COPY src/Main.java ./Main.java
 
 # Compilar la suite con el thin JAR
 RUN VER="$(cat /artifacts/VERSION_NUM)"; \
-    javac -cp "/artifacts/sqlite-native-runtime-${VER}.jar" Main.java
+    javac -cp "/artifacts/ether-sqlite-runtime-${VER}.jar" Main.java
 
 # ── Test 1: thin JAR ──────────────────────────────────────────────────────────
 # --enable-preview obligatorio: el JAR tiene bytecode Java 21 preview (JEP 442)
@@ -182,8 +182,8 @@ RUN printf "\n╔═════════════════════
     VER="$(cat /artifacts/VERSION_NUM)" && \
     java --enable-preview \
          --enable-native-access=ALL-UNNAMED \
-         -Dsnr.test.mode=JVM-thin \
-         -cp "/artifacts/sqlite-native-runtime-${VER}.jar:." \
+         -Dether.sqlite.test.mode=JVM-thin \
+         -cp "/artifacts/ether-sqlite-runtime-${VER}.jar:." \
          Main
 
 # ── Test 2: fat JAR ───────────────────────────────────────────────────────────
@@ -193,8 +193,8 @@ RUN printf "\n╔═════════════════════
     VER="$(cat /artifacts/VERSION_NUM)" && \
     java --enable-preview \
          --enable-native-access=ALL-UNNAMED \
-         -Dsnr.test.mode=JVM-fat \
-         -cp "/artifacts/sqlite-native-runtime-${VER}-fat.jar:." \
+         -Dether.sqlite.test.mode=JVM-fat \
+         -cp "/artifacts/ether-sqlite-runtime-${VER}-fat.jar:." \
          Main
 
 # Marcador de éxito (la etapa test-release lo arrastra para crear dependencia)
@@ -210,14 +210,14 @@ ARG GRAALVM_TAG
 
 WORKDIR /build
 
-COPY --from=installer /artifacts/libsqlite_native_runtime.so /usr/local/lib/
+COPY --from=installer /artifacts/libether_sqlite_runtime.so /usr/local/lib/
 RUN ldconfig
 
 COPY --from=installer /artifacts/ /artifacts/
 COPY src/Main.java ./Main.java
 
 RUN VER="$(cat /artifacts/VERSION_NUM)"; \
-    JAR="/artifacts/sqlite-native-runtime-${VER}.jar"; \
+    JAR="/artifacts/ether-sqlite-runtime-${VER}.jar"; \
     printf "\n>>> Compilando Main.java como Native Image (GraalVM %s)...\n\n" "${GRAALVM_TAG}"; \
     javac --enable-preview --release 21 -cp "${JAR}" Main.java; \
     native-image \
@@ -225,11 +225,11 @@ RUN VER="$(cat /artifacts/VERSION_NUM)"; \
         --enable-native-access=ALL-UNNAMED \
         --enable-preview \
         --no-fallback \
-        -H:Name=snr-release-test \
+        -H:Name=ether-sqlite-release-test \
         -cp "${JAR}:." \
         Main; \
     printf "\n>>> Binario compilado:\n"; \
-    ls -lh snr-release-test
+    ls -lh ether-sqlite-release-test
 
 # ── Etapa 4: Ejecutar binarios nativos ────────────────────────────────────────
 #
@@ -244,27 +244,27 @@ RUN apt-get update \
 
 WORKDIR /test
 
-COPY --from=installer /artifacts/libsqlite_native_runtime.so /usr/local/lib/
+COPY --from=installer /artifacts/libether_sqlite_runtime.so /usr/local/lib/
 RUN ldconfig
 
 # Arrastrar el marcador: si test-jvm no completó, este COPY falla → build falla
 COPY --from=test-jvm    /test/jvm-ok              /test/jvm-ok
-COPY --from=installer   /artifacts/snr-smoke-prebuilt ./snr-smoke-prebuilt
-COPY --from=build-native /build/snr-release-test   ./snr-release-test
+COPY --from=installer   /artifacts/ether-sqlite-prebuilt ./ether-sqlite-prebuilt
+COPY --from=build-native /build/ether-sqlite-release-test   ./ether-sqlite-release-test
 
 # ── Test 3: binario nativo pre-compilado del release ─────────────────────────
 RUN printf "\n╔══════════════════════════════════════════╗\n" && \
     printf   "║  Test 3/4 — Native Image (prebuilt)     ║\n" && \
     printf   "╚══════════════════════════════════════════╝\n\n" && \
-    ./snr-smoke-prebuilt && \
-    printf "\n✓ snr-smoke prebuilt: OK\n"
+    ./ether-sqlite-prebuilt && \
+    printf "\n✓ ether-sqlite prebuilt: OK\n"
 
 # ── Test 4: Main.java compilado como Native Image en esta build ───────────────
 RUN printf "\n╔══════════════════════════════════════════╗\n" && \
     printf   "║  Test 4/4 — Native Image (esta build)   ║\n" && \
     printf   "╚══════════════════════════════════════════╝\n\n" && \
-    ./snr-release-test && \
-    printf "\n✓ snr-release-test native: OK\n"
+    ./ether-sqlite-release-test && \
+    printf "\n✓ ether-sqlite-release-test native: OK\n"
 
 # ── Resumen final ─────────────────────────────────────────────────────────────
 RUN printf "\n"; \

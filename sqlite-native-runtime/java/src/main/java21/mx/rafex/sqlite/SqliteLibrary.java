@@ -14,7 +14,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Bindings de bajo nivel (Panama FFI) para {@code libsqlite_native_runtime}.
+ * Bindings de bajo nivel (Panama FFI) para {@code libether_sqlite_runtime}.
  *
  * <p>Cada método estático corresponde 1:1 a un símbolo {@code snr_*} exportado
  * por el crate Rust. La carga de la librería ocurre una sola vez al inicializar
@@ -504,14 +504,14 @@ public final class SqliteLibrary {
     private static MethodHandle find(String symbol, FunctionDescriptor desc) {
         var addr = LIB.find(symbol)
             .orElseThrow(() -> new UnsatisfiedLinkError(
-                "símbolo no encontrado en libsqlite_native_runtime: " + symbol));
+                "símbolo no encontrado en libether_sqlite_runtime: " + symbol));
         return LINKER.downcallHandle(addr, desc);
     }
 
     private static SymbolLookup loadLibrary() {
         var explicit = System.getProperty(
-            "snr.lib",
-            System.getenv().getOrDefault("SNR_LIB", "")).trim();
+            "ether.sqlite.lib",
+            System.getenv().getOrDefault("ETHER_SQLITE_LIB", "")).trim();
 
         List<Path> candidates = new ArrayList<>();
         if (!explicit.isBlank()) {
@@ -521,24 +521,24 @@ public final class SqliteLibrary {
         // Rutas de usuario (XDG) — instalación sin sudo via el script de instalación
         var home = System.getProperty("user.home", "");
         if (!home.isBlank()) {
-            candidates.add(Path.of(home, ".local", "lib", "libsqlite_native_runtime.dylib"));
-            candidates.add(Path.of(home, ".local", "lib", "libsqlite_native_runtime.so"));
+            candidates.add(Path.of(home, ".local", "lib", "libether_sqlite_runtime.dylib"));
+            candidates.add(Path.of(home, ".local", "lib", "libether_sqlite_runtime.so"));
         }
         // macOS — rutas del sistema
-        candidates.add(Path.of("/usr/local/lib/libsqlite_native_runtime.dylib"));
-        candidates.add(Path.of("/opt/snr/lib/libsqlite_native_runtime.dylib"));
-        candidates.add(Path.of("/opt/homebrew/lib/libsqlite_native_runtime.dylib"));
+        candidates.add(Path.of("/usr/local/lib/libether_sqlite_runtime.dylib"));
+        candidates.add(Path.of("/opt/snr/lib/libether_sqlite_runtime.dylib"));
+        candidates.add(Path.of("/opt/homebrew/lib/libether_sqlite_runtime.dylib"));
         // Linux — rutas del sistema
-        candidates.add(Path.of("/usr/local/lib/libsqlite_native_runtime.so"));
-        candidates.add(Path.of("/opt/snr/lib/libsqlite_native_runtime.so"));
+        candidates.add(Path.of("/usr/local/lib/libether_sqlite_runtime.so"));
+        candidates.add(Path.of("/opt/snr/lib/libether_sqlite_runtime.so"));
         // Directorio de trabajo — solo para desarrollo local (I-1).
-        // En producción define snr.lib o SNR_LIB con una ruta absoluta;
+        // En producción define ether.sqlite.lib o ETHER_SQLITE_LIB con una ruta absoluta;
         // confiar en CWD permite plantar una .so/dylib maliciosa si el directorio
         // es escribible por un proceso no confiable.
-        candidates.add(Path.of("libsqlite_native_runtime.dylib"));
-        candidates.add(Path.of("libsqlite_native_runtime.so"));
-        candidates.add(Path.of("lib/libsqlite_native_runtime.dylib"));
-        candidates.add(Path.of("lib/libsqlite_native_runtime.so"));
+        candidates.add(Path.of("libether_sqlite_runtime.dylib"));
+        candidates.add(Path.of("libether_sqlite_runtime.so"));
+        candidates.add(Path.of("lib/libether_sqlite_runtime.dylib"));
+        candidates.add(Path.of("lib/libether_sqlite_runtime.so"));
 
         var tried = new StringBuilder();
         for (var candidate : candidates) {
@@ -549,8 +549,8 @@ public final class SqliteLibrary {
                     continue;
                 }
                 if (!candidate.isAbsolute()) {
-                    System.err.println("[snr] AVISO: cargando desde CWD: " + abs
-                        + " — en producción define snr.lib o SNR_LIB con ruta absoluta.");
+                    System.err.println("[esr] AVISO: cargando desde CWD: " + abs
+                        + " — en producción define ether.sqlite.lib o ETHER_SQLITE_LIB con ruta absoluta.");
                 }
                 return SymbolLookup.libraryLookup(abs, Arena.global());
             } catch (Throwable t) {
@@ -561,8 +561,8 @@ public final class SqliteLibrary {
         }
 
         throw new IllegalStateException(
-            "No se pudo cargar libsqlite_native_runtime. " +
-            "Define snr.lib o SNR_LIB con la ruta al .so/.dylib.\n" +
+            "No se pudo cargar libether_sqlite_runtime. " +
+            "Define ether.sqlite.lib o ETHER_SQLITE_LIB con la ruta al .so/.dylib.\n" +
             "Rutas intentadas:\n" + tried
         );
     }

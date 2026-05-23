@@ -1,20 +1,20 @@
 #!/usr/bin/env sh
 # ─────────────────────────────────────────────────────────────────────────────
-# install.sh — Instala libsqlite_native_runtime en Linux (amd64 / arm64)
+# install.sh — Instala libether_sqlite_runtime en Linux (amd64 / arm64)
 #
 # Uso rápido (última versión):
 #   curl -sS https://raw.githubusercontent.com/rafex/sqlite-native-runtime/main/scripts/release/install.sh | sh
 #
 # Versión específica:
-#   SNR_VERSION=v0.1.1 curl -sS ...url.../install.sh | sh
+#   ETHER_SQLITE_VERSION=v0.1.1 curl -sS ...url.../install.sh | sh
 #
 # Forzar instalación en directorio de usuario (sin sudo):
 #   SNR_USER_INSTALL=1 curl -sS ...url.../install.sh | sh
 #
 # Lógica de instalación:
-#   Con sudo  → /usr/local/lib/libsqlite_native_runtime.so  (auto-detectado por la JVM)
-#   Sin sudo  → ~/.local/lib/libsqlite_native_runtime.so   (auto-detectado por la JVM ≥0.1.1)
-#              + export SNR_LIB añadido al shell rc del usuario
+#   Con sudo  → /usr/local/lib/libether_sqlite_runtime.so  (auto-detectado por la JVM)
+#   Sin sudo  → ~/.local/lib/libether_sqlite_runtime.so   (auto-detectado por la JVM ≥0.1.1)
+#              + export ETHER_SQLITE_LIB añadido al shell rc del usuario
 # ─────────────────────────────────────────────────────────────────────────────
 set -e
 
@@ -59,7 +59,7 @@ case "$OS" in
         echo "    cd sqlite-native-runtime"
         echo "    make build-rust"
         echo "    # La librería queda en:"
-        echo "    # sqlite-native-runtime/rust/target/release/libsqlite_native_runtime.dylib"
+        echo "    # sqlite-native-runtime/rust/target/release/libether_sqlite_runtime.dylib"
         echo ""
         exit 0
         ;;
@@ -100,12 +100,12 @@ case "$ARCH" in
         ;;
 esac
 
-LIB_ARTIFACT="libsqlite_native_runtime-${LIB_ARCH}.so"
-LIB_FILE="libsqlite_native_runtime.so"
+LIB_ARTIFACT="libether_sqlite_runtime-${LIB_ARCH}.so"
+LIB_FILE="libether_sqlite_runtime.so"
 
 # ── Detectar versión ─────────────────────────────────────────────────────────
-if [ -n "${SNR_VERSION:-}" ]; then
-    VERSION="$SNR_VERSION"
+if [ -n "${ETHER_SQLITE_VERSION:-}" ]; then
+    VERSION="$ETHER_SQLITE_VERSION"
 else
     info "→ Consultando última versión..."
     VERSION="$(fetch "$GITHUB_API" | grep '"tag_name"' \
@@ -139,7 +139,7 @@ DEST="${INSTALL_DIR}/${LIB_FILE}"
 
 # ── Resumen ───────────────────────────────────────────────────────────────────
 echo ""
-info "sqlite-native-runtime — instalador"
+info "ether-sqlite-runtime — instalador"
 echo "  Versión     : ${VERSION}"
 echo "  Artefacto   : ${LIB_ARTIFACT}"
 echo "  Destino     : ${DEST}"
@@ -214,16 +214,16 @@ else
     echo "  La JVM detecta automáticamente ~/.local/lib desde la versión v0.1.1."
     echo "  Si usas una versión anterior, añade al shell rc:"
     echo ""
-    echo "    export SNR_LIB=\"${DEST}\""
+    echo "    export ETHER_SQLITE_LIB=\"${DEST}\""
     echo ""
 
-    # Auto-configurar SNR_LIB en el shell rc si no está ya configurado
+    # Auto-configurar ETHER_SQLITE_LIB en el shell rc si no está ya configurado
     _added=0
     for RC in "${HOME}/.bashrc" "${HOME}/.zshrc" "${HOME}/.profile"; do
-        if [ -f "$RC" ] && ! grep -q "SNR_LIB" "$RC" 2>/dev/null; then
-            printf '\n# sqlite-native-runtime (añadido por install.sh)\nexport SNR_LIB="%s"\n' \
+        if [ -f "$RC" ] && ! grep -q "ETHER_SQLITE_LIB" "$RC" 2>/dev/null; then
+            printf '\n# sqlite-native-runtime (añadido por install.sh)\nexport ETHER_SQLITE_LIB="%s"\n' \
                 "$DEST" >> "$RC"
-            ok "SNR_LIB añadido a ${RC}"
+            ok "ETHER_SQLITE_LIB añadido a ${RC}"
             _added=1
         fi
     done

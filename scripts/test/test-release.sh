@@ -14,7 +14,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 set -e
 
-SNR_VERSION="${1:-latest}"
+ETHER_SQLITE_VERSION="${1:-latest}"
 PLATFORM="${2:-linux/amd64,linux/arm64}"
 CONTAINER_ENGINE="${CONTAINER_ENGINE:-docker}"
 
@@ -60,8 +60,8 @@ DOCKERFILE_DIR="${REPO_ROOT}/containers/test-release"
     || die "No se encontró Dockerfile en ${DOCKERFILE_DIR}"
 
 echo ""
-info "sqlite-native-runtime — test de artefactos del release"
-echo "  Versión   : ${SNR_VERSION}"
+info "ether-sqlite-runtime — test de artefactos del release"
+echo "  Versión   : ${ETHER_SQLITE_VERSION}"
 echo "  Plataforma: ${PLATFORM}"
 echo "  Engine    : ${CONTAINER_ENGINE}"
 echo "  Contexto  : ${DOCKERFILE_DIR}"
@@ -70,11 +70,11 @@ echo ""
 # ── Ejecutar el build multi-plataforma ────────────────────────────────────────
 "${CONTAINER_ENGINE}" buildx build \
     --platform "${PLATFORM}" \
-    --build-arg "SNR_VERSION=${SNR_VERSION}" \
+    --build-arg "ETHER_SQLITE_VERSION=${ETHER_SQLITE_VERSION}" \
     --progress=plain \
     --target test-release \
     "${DOCKERFILE_DIR}"
 
 echo ""
-ok "Test de release completado: versión ${SNR_VERSION} en ${PLATFORM}"
+ok "Test de release completado: versión ${ETHER_SQLITE_VERSION} en ${PLATFORM}"
 echo ""

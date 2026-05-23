@@ -5,6 +5,6 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../commons/env.sh"
 
 cd "$JAVA_DIR"
-SNR_LIB="$SNR_LIB" JAVA_HOME="$GRAALVM_HOME" ./mvnw verify
+ETHER_SQLITE_LIB="$ETHER_SQLITE_LIB" JAVA_HOME="$GRAALVM_HOME" ./mvnw verify
 
 echo "Reporte de cobertura: ${JAVA_DIR}/target/site/jacoco/index.html"

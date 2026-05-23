@@ -4,7 +4,7 @@ package mx.rafex.sqlite;
  * Test de humo — ejecutar con:
  *
  * <pre>
- *   SNR_LIB=/path/to/libsqlite_native_runtime.dylib \
+ *   ETHER_SQLITE_LIB=/path/to/libether_sqlite_runtime.dylib \
  *   java --enable-native-access=ALL-UNNAMED -cp target/classes:target/test-classes \
  *        mx.rafex.sqlite.SmokeTest
  * </pre>

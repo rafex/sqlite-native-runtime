@@ -1,11 +1,11 @@
 [package]
-name    = "sqlite-native-runtime"
+name    = "ether-sqlite"
 version = "0.1.0"
 edition = "2021"
 description = "SQLite C ABI para Java/GraalVM vía Panama FFI"
 
 [lib]
-name       = "sqlite_native_runtime"
+name       = "ether_sqlite_runtime"
 crate-type = ["cdylib", "staticlib", "rlib"]
 
 [dependencies]

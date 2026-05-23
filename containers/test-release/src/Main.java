@@ -34,9 +34,9 @@ public class Main {
     interface TestFn { void run() throws Exception; }
 
     public static void main(String[] args) {
-        String mode = System.getProperty("snr.test.mode", "JVM");
+        String mode = System.getProperty("ether.sqlite.test.mode", "JVM");
         System.out.println("┌──────────────────────────────────────────────┐");
-        System.out.printf( "│  sqlite-native-runtime — Release Test %-7s│%n", "[" + mode + "]");
+        System.out.printf( "│  ether-sqlite-runtime — Release Test %-7s│%n", "[" + mode + "]");
         System.out.println("└──────────────────────────────────────────────┘");
         System.out.println();
 

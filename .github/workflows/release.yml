@@ -6,28 +6,28 @@
 #   • workflow_dispatch : permite relanzar manualmente cualquier tag fallido
 #
 # Artefactos publicados en el GitHub Release (21 ficheros):
-#   libsqlite_native_runtime-linux-amd64.so          ← Rust nativo, runner x86_64
-#   libsqlite_native_runtime-linux-amd64.so.sha256
-#   libsqlite_native_runtime-linux-arm64.so          ← Rust nativo, runner arm64
-#   libsqlite_native_runtime-linux-arm64.so.sha256
+#   libether_sqlite_runtime-linux-amd64.so          ← Rust nativo, runner x86_64
+#   libether_sqlite_runtime-linux-amd64.so.sha256
+#   libether_sqlite_runtime-linux-arm64.so          ← Rust nativo, runner arm64
+#   libether_sqlite_runtime-linux-arm64.so.sha256
 #
-#   sqlite-native-runtime-{version}.jar              ← Java 25 thin JAR (estable, sin flags extra)
-#   sqlite-native-runtime-{version}.jar.sha256
-#   sqlite-native-runtime-{version}-fat.jar          ← Java 25 fat JAR
-#   sqlite-native-runtime-{version}-fat.jar.sha256
-#   sqlite-native-runtime-{version}-java21.jar       ← Java 21 thin JAR (--enable-preview)
-#   sqlite-native-runtime-{version}-java21.jar.sha256
-#   sqlite-native-runtime-{version}-java21-fat.jar   ← Java 21 fat JAR (--enable-preview)
-#   sqlite-native-runtime-{version}-java21-fat.jar.sha256
+#   ether-sqlite-runtime-{version}.jar              ← Java 25 thin JAR (estable, sin flags extra)
+#   ether-sqlite-runtime-{version}.jar.sha256
+#   ether-sqlite-runtime-{version}-fat.jar          ← Java 25 fat JAR
+#   ether-sqlite-runtime-{version}-fat.jar.sha256
+#   ether-sqlite-runtime-{version}-java21.jar       ← Java 21 thin JAR (--enable-preview)
+#   ether-sqlite-runtime-{version}-java21.jar.sha256
+#   ether-sqlite-runtime-{version}-java21-fat.jar   ← Java 21 fat JAR (--enable-preview)
+#   ether-sqlite-runtime-{version}-java21-fat.jar.sha256
 #
-#   snr-smoke-linux-amd64                            ← GraalVM Native Image Java 25, x86_64
-#   snr-smoke-linux-amd64.sha256
-#   snr-smoke-linux-arm64                            ← GraalVM Native Image Java 25, arm64
-#   snr-smoke-linux-arm64.sha256
-#   snr-smoke-java21-linux-amd64                     ← GraalVM Native Image Java 21, x86_64
-#   snr-smoke-java21-linux-amd64.sha256
-#   snr-smoke-java21-linux-arm64                     ← GraalVM Native Image Java 21, arm64
-#   snr-smoke-java21-linux-arm64.sha256
+#   ether-sqlite-linux-amd64.bin                            ← GraalVM Native Image Java 25, x86_64
+#   ether-sqlite-linux-amd64.bin.sha256
+#   ether-sqlite-linux-arm64.bin                            ← GraalVM Native Image Java 25, arm64
+#   ether-sqlite-linux-arm64.bin.sha256
+#   ether-sqlite-java21-linux-amd64.bin                     ← GraalVM Native Image Java 21, x86_64
+#   ether-sqlite-java21-linux-amd64.bin.sha256
+#   ether-sqlite-java21-linux-arm64.bin                     ← GraalVM Native Image Java 21, arm64
+#   ether-sqlite-java21-linux-arm64.bin.sha256
 #
 #   install.sh                                       ← script de instalación de la .so
 #
@@ -70,7 +70,7 @@ env:
 
 jobs:
 
-  # ── 1. Compilar libsqlite_native_runtime.so — matrix x86_64 / arm64 ──────────
+  # ── 1. Compilar libether_sqlite_runtime.so — matrix x86_64 / arm64 ──────────
   build-rust:
     name: "🦀 Rust .so (${{ matrix.arch }})"
     runs-on: ${{ matrix.runner }}
@@ -82,12 +82,12 @@ jobs:
             runner: ubuntu-latest
             rust_target: x86_64-unknown-linux-gnu
             zig_arch: x86_64
-            lib: libsqlite_native_runtime-linux-amd64.so
+            lib: libether_sqlite_runtime-linux-amd64.so
           - arch: arm64
             runner: ubuntu-24.04-arm
             rust_target: aarch64-unknown-linux-gnu
             zig_arch: aarch64
-            lib: libsqlite_native_runtime-linux-arm64.so
+            lib: libether_sqlite_runtime-linux-arm64.so
 
     steps:
       - uses: actions/checkout@v4
@@ -126,7 +126,7 @@ jobs:
       - name: Collect artifact
         run: |
           mkdir -p dist
-          cp sqlite-native-runtime/rust/target/${{ matrix.rust_target }}/release/libsqlite_native_runtime.so \
+          cp sqlite-native-runtime/rust/target/${{ matrix.rust_target }}/release/libether_sqlite_runtime.so \
              dist/${{ matrix.lib }}
 
       - uses: actions/upload-artifact@v4
@@ -173,10 +173,10 @@ jobs:
         run: |
           mkdir -p dist
           VERSION="${RELEASE_TAG#v}"
-          cp "sqlite-native-runtime/java/target/sqlite-native-runtime-${VERSION}.jar" \
-             "dist/sqlite-native-runtime-${VERSION}.jar"
-          cp "sqlite-native-runtime/java/target/sqlite-native-runtime-${VERSION}-fat.jar" \
-             "dist/sqlite-native-runtime-${VERSION}-fat.jar"
+          cp "sqlite-native-runtime/java/target/ether-sqlite-runtime-${VERSION}.jar" \
+             "dist/ether-sqlite-runtime-${VERSION}.jar"
+          cp "sqlite-native-runtime/java/target/ether-sqlite-runtime-${VERSION}-fat.jar" \
+             "dist/ether-sqlite-runtime-${VERSION}-fat.jar"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -214,8 +214,8 @@ jobs:
             --no-transfer-progress -q
 
       # Perfil java21: src/main/java21, --release 21, --enable-preview
-      # Produce: sqlite-native-runtime-{version}-java21.jar (finalName override)
-      #          sqlite-native-runtime-{version}-java21-fat.jar
+      # Produce: ether-sqlite-runtime-{version}-java21.jar (finalName override)
+      #          ether-sqlite-runtime-{version}-java21-fat.jar
       - name: Build Java 21 thin JAR + fat JAR
         working-directory: sqlite-native-runtime/java
         run: ./mvnw -Pjava21 package -DskipTests --no-transfer-progress
@@ -224,10 +224,10 @@ jobs:
         run: |
           mkdir -p dist
           VERSION="${RELEASE_TAG#v}"
-          cp "sqlite-native-runtime/java/target/sqlite-native-runtime-${VERSION}-java21.jar" \
-             "dist/sqlite-native-runtime-${VERSION}-java21.jar"
-          cp "sqlite-native-runtime/java/target/sqlite-native-runtime-${VERSION}-java21-fat.jar" \
-             "dist/sqlite-native-runtime-${VERSION}-java21-fat.jar"
+          cp "sqlite-native-runtime/java/target/ether-sqlite-runtime-${VERSION}-java21.jar" \
+             "dist/ether-sqlite-runtime-${VERSION}-java21.jar"
+          cp "sqlite-native-runtime/java/target/ether-sqlite-runtime-${VERSION}-java21-fat.jar" \
+             "dist/ether-sqlite-runtime-${VERSION}-java21-fat.jar"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -245,12 +245,12 @@ jobs:
         include:
           - arch: amd64
             runner: ubuntu-latest
-            lib: libsqlite_native_runtime-linux-amd64.so
-            binary: snr-smoke-linux-amd64
+            lib: libether_sqlite_runtime-linux-amd64.so
+            binary: ether-sqlite-linux-amd64.bin
           - arch: arm64
             runner: ubuntu-24.04-arm
-            lib: libsqlite_native_runtime-linux-arm64.so
-            binary: snr-smoke-linux-arm64
+            lib: libether_sqlite_runtime-linux-arm64.so
+            binary: ether-sqlite-linux-arm64.bin
 
     steps:
       - uses: actions/checkout@v4
@@ -288,7 +288,7 @@ jobs:
       - name: Collect artifact
         run: |
           mkdir -p out
-          cp sqlite-native-runtime/java/target/snr-smoke out/${{ matrix.binary }}
+          cp sqlite-native-runtime/java/target/ether-sqlite out/${{ matrix.binary }}
           chmod +x out/${{ matrix.binary }}
 
       - uses: actions/upload-artifact@v4
@@ -298,7 +298,7 @@ jobs:
 
   # ── 3b. GraalVM Native Image Java 21 — matrix x86_64 / arm64 ────────────────
   #
-  # Compila snr-smoke-java21 con el perfil java21 + native-java21.
+  # Compila ether-sqlite-java21 con el perfil java21 + native-java21.
   # El binario resultante NO requiere --enable-preview en runtime:
   # GraalVM AOT compila el bytecode preview a código nativo puro.
   build-native-java21:
@@ -311,12 +311,12 @@ jobs:
         include:
           - arch: amd64
             runner: ubuntu-latest
-            lib: libsqlite_native_runtime-linux-amd64.so
-            binary: snr-smoke-java21-linux-amd64
+            lib: libether_sqlite_runtime-linux-amd64.so
+            binary: ether-sqlite-java21-linux-amd64.bin
           - arch: arm64
             runner: ubuntu-24.04-arm
-            lib: libsqlite_native_runtime-linux-arm64.so
-            binary: snr-smoke-java21-linux-arm64
+            lib: libether_sqlite_runtime-linux-arm64.so
+            binary: ether-sqlite-java21-linux-arm64.bin
 
     steps:
       - uses: actions/checkout@v4
@@ -354,7 +354,7 @@ jobs:
       - name: Collect artifact
         run: |
           mkdir -p out
-          cp sqlite-native-runtime/java/target/snr-smoke-java21 out/${{ matrix.binary }}
+          cp sqlite-native-runtime/java/target/ether-sqlite-java21 out/${{ matrix.binary }}
           chmod +x out/${{ matrix.binary }}
 
       - uses: actions/upload-artifact@v4

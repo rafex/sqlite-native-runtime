@@ -16,7 +16,7 @@ use std::ffi::{CStr, CString};
 use std::os::raw::c_char;
 use std::ptr;
 
-use sqlite_native_runtime::{
+use ether_sqlite_runtime::{
     snr_begin, snr_begin_exclusive, snr_begin_immediate, snr_bind_blob, snr_bind_double,
     snr_bind_int, snr_bind_null, snr_bind_parameter_index, snr_bind_text, snr_changes,
     snr_checkpoint_full, snr_checkpoint_passive, snr_checkpoint_restart, snr_checkpoint_truncate,

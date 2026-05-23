@@ -14,7 +14,7 @@
 #   1. install.sh del release   — el script de instalación publicado funciona
 #   2. thin JAR + JVM           — API Java completa sobre la .so instalada
 #   3. fat JAR + JVM            — mismo test, JAR standalone sin dependencias
-#   4. snr-smoke prebuilt       — binario nativo pre-compilado del release
+#   4. ether-sqlite prebuilt       — binario nativo pre-compilado del release
 #   5. Native Image (build)     — compilación de Main.java con native-image 25
 #
 # Grafo de ejecución:
@@ -65,7 +65,7 @@ jobs:
       - name: "Build y test de artefactos del release"
         run: |
           docker build \
-            --build-arg SNR_VERSION="${{ inputs.release_tag || 'latest' }}" \
+            --build-arg ETHER_SQLITE_VERSION="${{ inputs.release_tag || 'latest' }}" \
             --progress=plain \
             --target test-release \
             containers/test-release/

@@ -17,7 +17,7 @@ build_target() {
   cd "$RUST_DIR"
   PATH="${CARGO_BIN}:${PATH}" \
     "$CARGO" zigbuild --release --target "${triple}.${GLIBC_MIN}"
-  echo "Librería: ${RUST_DIR}/target/${triple}/release/libsqlite_native_runtime.so"
+  echo "Librería: ${RUST_DIR}/target/${triple}/release/libether_sqlite_runtime.so"
 }
 
 case "$PLATFORM" in
