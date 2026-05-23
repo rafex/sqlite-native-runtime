@@ -11,17 +11,16 @@
   <packaging>jar</packaging>
 
   <name>sqlite-native-runtime</name>
-  <description>Binding Panama FFI para libsqlite_native_runtime — requiere Java 21 con --enable-preview (JEP 442)</description>
+  <description>Binding Panama FFI para libsqlite_native_runtime — Java 25 stable (JEP 454) y Java 21 preview (JEP 442)</description>
 
   <properties>
     <!--
-      Java 21 LTS como target de bytecode, compilado con GraalVM JDK 25.
-      Panama FFM API (java.lang.foreign.*) estaba en PREVIEW en Java 21 (JEP 442).
-      El bytecode generado lleva el flag de preview (minor_version=0xFFFF) y SOLO
-      puede ejecutarse en Java 21 con --enable-preview.
-      NOTA: este JAR NO es compatible con Java 22+ (UnsupportedClassVersionError).
+      Java 25 LTS como target de bytecode por defecto, compilado con GraalVM JDK 25.
+      Panama FFM API (java.lang.foreign.*) es estable desde Java 22 (JEP 454).
+      Para Java 21 usar el perfil -Pjava21 que activa --enable-preview y
+      las fuentes de src/main/java21 (API preview JEP 442).
     -->
-    <java.version>21</java.version>
+    <java.version>25</java.version>
     <maven.compiler.release>${java.version}</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
@@ -45,16 +44,10 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
-        <configuration>
-          <!--
-            Panama FFM era PREVIEW en Java 21 (JEP 442): se requiere --enable-preview
-            tanto en compilacion como en runtime. El flag habilita la API
-            java.lang.foreign.* que en Java 22 se estabilizo (JEP 454).
-          -->
-          <compilerArgs>
-            <arg>--enable-preview</arg>
-          </compilerArgs>
-        </configuration>
+        <!--
+          Java 25: Panama FFM estable (JEP 454) — sin --enable-preview.
+          Para Java 21 preview usar -Pjava21.
+        -->
       </plugin>
 
       <plugin>
@@ -69,7 +62,7 @@
             Los tests de integracion (@Tag("integration")) se excluyen del run por defecto
             — se activan con: mvn test -Pintegration
           -->
-          <argLine>@{argLine} --enable-preview --enable-native-access=ALL-UNNAMED</argLine>
+          <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
           <excludedGroups>integration</excludedGroups>
         </configuration>
       </plugin>
@@ -200,7 +193,7 @@
             <version>3.5.2</version>
             <configuration combine.self="override">
               <groups>integration</groups>
-              <argLine>@{argLine} --enable-preview --enable-native-access=ALL-UNNAMED</argLine>
+              <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
             </configuration>
           </plugin>
         </plugins>
@@ -228,13 +221,8 @@
               <buildArgs>
                 <!-- SqliteLibrary carga la dylib en bloque estatico: inicializar en runtime -->
                 <buildArg>--initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary</buildArg>
-                <!-- Panama FFM requiere acceso nativo -->
+                <!-- Panama FFM requiere acceso nativo (JEP 454 estable, sin --enable-preview) -->
                 <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
-                <!--
-                  El bytecode usa Java 21 preview (JEP 442): el compilador AOT
-                  de GraalVM debe procesarlo con --enable-preview igual que la JVM.
-                -->
-                <buildArg>--enable-preview</buildArg>
                 <!-- Incluir test-classes en el classpath del native build -->
                 <buildArg>-cp</buildArg>
                 <buildArg>${project.build.outputDirectory}:${project.build.testOutputDirectory}</buildArg>
@@ -244,6 +232,110 @@
         </plugins>
       </build>
     </profile>
+    <!--
+      Perfil java21: compila con Java 21 LTS + --enable-preview.
+      Panama FFM era PREVIEW en Java 21 (JEP 442): requiere --enable-preview
+      en compilacion y en runtime. El bytecode generado (minor_version=0xFFFF)
+      solo puede ejecutarse en Java 21 JVM con --enable-preview.
+
+      Fuentes: src/main/java21 (usa allocateUtf8String, getUtf8String — API Java 21 preview).
+      Artefacto: sqlite-native-runtime-{version}-java21.jar
+                 sqlite-native-runtime-{version}-java21-fat.jar
+
+      Uso: mvn -Pjava21 package
+    -->
+    <profile>
+      <id>java21</id>
+      <build>
+        <sourceDirectory>${project.basedir}/src/main/java21</sourceDirectory>
+        <finalName>${project.artifactId}-${project.version}-java21</finalName>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-compiler-plugin</artifactId>
+            <version>3.13.0</version>
+            <configuration>
+              <release>21</release>
+              <compilerArgs>
+                <arg>--enable-preview</arg>
+              </compilerArgs>
+            </configuration>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <version>3.5.2</version>
+            <configuration combine.self="override">
+              <argLine>@{argLine} --enable-preview --enable-native-access=ALL-UNNAMED</argLine>
+              <excludedGroups>integration</excludedGroups>
+            </configuration>
+          </plugin>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-shade-plugin</artifactId>
+            <version>3.6.0</version>
+            <executions>
+              <execution>
+                <phase>package</phase>
+                <goals><goal>shade</goal></goals>
+                <configuration>
+                  <shadedArtifactAttached>true</shadedArtifactAttached>
+                  <shadedClassifierName>fat</shadedClassifierName>
+                  <createDependencyReducedPom>false</createDependencyReducedPom>
+                  <filters>
+                    <filter>
+                      <artifact>*:*</artifact>
+                      <excludes>
+                        <exclude>META-INF/*.SF</exclude>
+                        <exclude>META-INF/*.DSA</exclude>
+                        <exclude>META-INF/*.RSA</exclude>
+                      </excludes>
+                    </filter>
+                  </filters>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <!--
+      Perfil native-java21: compila snr-smoke-java21 con GraalVM 25 native-image
+      a partir de fuentes Java 21 preview (--enable-preview).
+
+      Uso: mvn -Pjava21,native-java21 package native:compile
+    -->
+    <profile>
+      <id>native-java21</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.graalvm.buildtools</groupId>
+            <artifactId>native-maven-plugin</artifactId>
+            <version>${native.maven.plugin.version}</version>
+            <extensions>true</extensions>
+            <configuration>
+              <imageName>snr-smoke-java21</imageName>
+              <mainClass>mx.rafex.sqlite.SmokeTest</mainClass>
+              <buildArgs>
+                <buildArg>--initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary</buildArg>
+                <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
+                <!--
+                  Bytecode Java 21 preview: GraalVM AOT lo procesa con --enable-preview.
+                  El binario resultante NO requiere --enable-preview en runtime
+                  (el native image ya tiene todo compilado).
+                -->
+                <buildArg>--enable-preview</buildArg>
+                <buildArg>-cp</buildArg>
+                <buildArg>${project.build.outputDirectory}:${project.build.testOutputDirectory}</buildArg>
+              </buildArgs>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
   </profiles>
 
 </project>
