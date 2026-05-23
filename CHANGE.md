@@ -5,6 +5,11 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ## [Unreleased]
 
+## [v0.2.0] — 2026-05-22
+
+### ✨ Nuevas funcionalidades
+- target Java 21 + --enable-preview (Panama FFM JEP 442)
+
 ## [v0.1.4] — 2026-05-22
 
 ### ✨ Nuevas funcionalidades
