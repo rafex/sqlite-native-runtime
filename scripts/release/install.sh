@@ -59,7 +59,7 @@ case "$OS" in
         echo "    cd sqlite-native-runtime"
         echo "    make build-rust"
         echo "    # La librería queda en:"
-        echo "    # sqlite-native-runtime/rust/target/release/libether_sqlite_runtime.dylib"
+        echo "    # sqlite-native-runtime/rust/ether-sqlite/target/release/libether_sqlite_runtime.dylib"
         echo ""
         exit 0
         ;;

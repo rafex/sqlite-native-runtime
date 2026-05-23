@@ -59,7 +59,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('sqlite-native-runtime/rust/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('sqlite-native-runtime/rust/ether-sqlite/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build image and run Rust tests
@@ -76,7 +76,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('sqlite-native-runtime/java/pom.xml') }}
+          key: ${{ runner.os }}-maven-${{ hashFiles('sqlite-native-runtime/java/ether-sqlite/pom.xml') }}
           restore-keys: ${{ runner.os }}-maven-
 
       - name: Build image and run Java tests

@@ -35,9 +35,9 @@ WORKDIR /app
 # ── Caching de dependencias ────────────────────────────────────────────────
 # Copiar solo los manifiestos primero: si el código cambia pero Cargo.toml no,
 # esta capa se reutiliza y no se re-descargan crates.
-COPY sqlite-native-runtime/rust/Cargo.toml ./Cargo.toml
+COPY sqlite-native-runtime/rust/ether-sqlite/Cargo.toml ./Cargo.toml
 # Cargo.lock es opcional para librerías; si existe mejora la reproducibilidad
-COPY sqlite-native-runtime/rust/Cargo.lock* ./
+COPY sqlite-native-runtime/rust/ether-sqlite/Cargo.lock* ./
 
 # Compilar una librería vacía para forzar la descarga de todas las dependencias
 RUN mkdir -p src \
@@ -46,8 +46,8 @@ RUN mkdir -p src \
  && rm -rf src target
 
 # ── Código fuente real ────────────────────────────────────────────────────
-COPY sqlite-native-runtime/rust/src   ./src
-COPY sqlite-native-runtime/rust/tests ./tests
+COPY sqlite-native-runtime/rust/ether-sqlite/src   ./src
+COPY sqlite-native-runtime/rust/ether-sqlite/tests ./tests
 
 # ── Tests ────────────────────────────────────────────────────────────────
 # TT-1: cargo test --lib   → 137 tests #[cfg(test)] internos

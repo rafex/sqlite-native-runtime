@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Cobertura Rust con cargo-llvm-cov.
 # Requiere: cargo install cargo-llvm-cov
-# Reporte HTML: sqlite-native-runtime/rust/target/llvm-cov/html/index.html
+# Reporte HTML: sqlite-native-runtime/rust/ether-sqlite/target/llvm-cov/html/index.html
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../commons/env.sh"
 

@@ -28,15 +28,15 @@ CONTAINER_ENGINE="${CONTAINER_ENGINE:-podman}"
 GLIBC_MIN="${GLIBC_MIN:-2.17}"
 
 # ── Rutas derivadas ───────────────────────────────────────────────────────────
-JAVA_DIR="${ROOT}/sqlite-native-runtime/java"
-RUST_DIR="${ROOT}/sqlite-native-runtime/rust"
+JAVA_DIR="${ROOT}/sqlite-native-runtime/java/ether-sqlite"
+RUST_DIR="${ROOT}/sqlite-native-runtime/rust/ether-sqlite"
 CONTAINERS_DIR="${ROOT}/containers"
 
 CARGO="${HOME}/.rustup/toolchains/${CARGO_TOOLCHAIN}/bin/cargo"
 RUSTC="${HOME}/.rustup/toolchains/${CARGO_TOOLCHAIN}/bin/rustc"
 CARGO_BIN="${HOME}/.rustup/toolchains/${CARGO_TOOLCHAIN}/bin"
 
-ETHER_SQLITE_LIB="${ROOT}/sqlite-native-runtime/rust/target/release/libether_sqlite_runtime.dylib"
+ETHER_SQLITE_LIB="${ROOT}/sqlite-native-runtime/rust/ether-sqlite/target/release/libether_sqlite_runtime.dylib"
 
 # ── Exportar todo ─────────────────────────────────────────────────────────────
 export ROOT

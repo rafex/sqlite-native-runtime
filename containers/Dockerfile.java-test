@@ -37,16 +37,16 @@ ENV PATH="/root/.cargo/bin:${PATH}"
 WORKDIR /app/rust
 
 # Caching de dependencias: manifiestos antes que código fuente
-COPY sqlite-native-runtime/rust/Cargo.toml ./Cargo.toml
-COPY sqlite-native-runtime/rust/Cargo.lock* ./
+COPY sqlite-native-runtime/rust/ether-sqlite/Cargo.toml ./Cargo.toml
+COPY sqlite-native-runtime/rust/ether-sqlite/Cargo.lock* ./
 
 RUN mkdir -p src \
  && printf 'pub fn _placeholder() {}' > src/lib.rs \
  && cargo build --release 2>&1 | tail -5 \
  && rm -rf src target
 
-COPY sqlite-native-runtime/rust/src ./src
-COPY sqlite-native-runtime/rust/tests ./tests
+COPY sqlite-native-runtime/rust/ether-sqlite/src ./src
+COPY sqlite-native-runtime/rust/ether-sqlite/tests ./tests
 
 # Compilar la .so release (el artifact que usa Java)
 RUN cargo build --release \
@@ -60,14 +60,14 @@ WORKDIR /app/java
 
 # Caching de dependencias Maven: copiar manifiestos antes que el código.
 # Si pom.xml no cambia, esta capa se reutiliza y no se re-descargan jars.
-COPY sqlite-native-runtime/java/.mvn   ./.mvn
-COPY sqlite-native-runtime/java/mvnw   ./
-COPY sqlite-native-runtime/java/pom.xml ./
+COPY sqlite-native-runtime/java/ether-sqlite/.mvn   ./.mvn
+COPY sqlite-native-runtime/java/ether-sqlite/mvnw   ./
+COPY sqlite-native-runtime/java/ether-sqlite/pom.xml ./
 RUN chmod +x mvnw \
  && ./mvnw dependency:go-offline --no-transfer-progress -q
 
 # Copiar código fuente (invalida solo esta capa en adelante)
-COPY sqlite-native-runtime/java/src ./src
+COPY sqlite-native-runtime/java/ether-sqlite/src ./src
 
 # Copiar librería nativa compilada en la etapa anterior
 COPY --from=rust-builder \
