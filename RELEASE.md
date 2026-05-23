@@ -1,8 +1,12 @@
-<!-- RELEASE_TAG: v0.1.1 -->
-# Release v0.1.1 — 2026-05-22
+<!-- RELEASE_TAG: v0.1.3 -->
+# Release v0.1.3 — 2026-05-22
 
-### 🐛 Correcciones
-- workflow_dispatch + RELEASE_TAG unificado + checkout con ref explícito
+### 📝 Documentación
+- add installation guide, usage guide, and install.sh script
 
-### 🔧 Mantenimiento
-- sistema de release con CHANGE.md, RELEASE.md y scripts tag-create/tag-push
+### 🧪 Tests
+- add Dockerfile and suite for validating release artifacts
+
+### ⚙️  CI / Build
+- remove workflow_dispatch from verify-release — only triggers after Release
+- use debian-slim, run install.sh from release, add verify-release workflow
