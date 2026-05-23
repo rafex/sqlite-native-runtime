@@ -5,6 +5,11 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ## [Unreleased]
 
+## [v0.3.0] — 2026-05-22
+
+### ✨ Nuevas funcionalidades
+- dual-target Java 21 preview + Java 25 stable artifacts
+
 ## [v0.2.0] — 2026-05-22
 
 ### ✨ Nuevas funcionalidades
