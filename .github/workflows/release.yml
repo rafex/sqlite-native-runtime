@@ -46,9 +46,11 @@ on:
         required: true
         type: string
 
-# Necesario para crear GitHub Releases y subir assets
+# contents: write  — crear GitHub Releases y subir assets
+# actions:  write  — disparar verify-release.yml al terminar
 permissions:
   contents: write
+  actions: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -307,3 +309,16 @@ jobs:
             --notes-file "${NOTES_FILE}" \
             artifacts/* \
             scripts/release/install.sh
+
+      # Dispara verify-release.yml pasando el tag exacto del release.
+      # Se lanza DESPUÉS de que todos los assets están subidos.
+      # verify-release.yml solo tiene trigger workflow_dispatch: nunca se
+      # dispara solo por commits a main.
+      - name: Trigger verify-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run verify-release.yml \
+            --repo "${{ github.repository }}" \
+            --ref main \
+            --field release_tag="${RELEASE_TAG}"

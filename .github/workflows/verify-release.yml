@@ -1,8 +1,14 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # verify-release.yml — Verifica los artefactos del GitHub Release
 #
-# Dispara ÚNICAMENTE cuando el workflow "Release" completa con éxito.
-# No tiene ningún otro trigger (ni workflow_dispatch, ni push, ni schedule).
+# Disparadores:
+#   • Automático : el job "release" de release.yml llama a
+#                  `gh workflow run verify-release.yml --field release_tag=vX.Y.Z`
+#                  justo después de subir todos los assets. Es el ÚNICO disparo
+#                  automático; nunca se lanza por commits a main.
+#   • Manual     : Actions → Verify Release → Run workflow
+#                  Sin inputs → valida el último release publicado (latest).
+#                  Con release_tag → valida esa versión concreta.
 #
 # Qué valida (para cada arquitectura):
 #   1. install.sh del release   — el script de instalación publicado funciona
@@ -12,19 +18,19 @@
 #   5. Native Image (build)     — compilación de Main.java con native-image 25
 #
 # Grafo de ejecución:
-#   Release (workflow) ──on:workflow_run──→ verify [amd64 / arm64]
+#   release.yml → gh workflow run → verify [amd64 / arm64]
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Verify Release
 
 on:
-  workflow_run:
-    workflows: ["Release"]
-    types: [completed]
-
-  # Permite lanzar manualmente contra el último release publicado.
-  # No acepta inputs: siempre valida el latest.
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag del release a verificar (vacío = último release publicado)'
+        required: false
+        default: ''
+        type: string
 
 permissions:
   contents: read
@@ -32,14 +38,8 @@ permissions:
 jobs:
 
   verify:
-    # Nota: el contexto 'env' NO está disponible en job.name (solo github, matrix,
-    # needs, vars, inputs). Se usa github.event.workflow_run.head_branch directamente.
-    name: "🔍 Verify ${{ github.event.workflow_run.head_branch }} (${{ matrix.arch }})"
+    name: "🔍 Verify ${{ inputs.release_tag || 'latest' }} (${{ matrix.arch }})"
     runs-on: ${{ matrix.runner }}
-
-    # workflow_run : solo si el Release completó con éxito.
-    # workflow_dispatch: siempre (el usuario lo lanzó explícitamente).
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
 
     strategy:
       fail-fast: false
@@ -51,34 +51,26 @@ jobs:
             runner: ubuntu-24.04-arm
 
     steps:
-      # Checkout de main para obtener el Dockerfile y la suite de tests.
-      # Los artefactos se descargan en tiempo de build desde el GitHub Release,
-      # por lo que el ref del checkout no afecta a qué versión se verifica.
       - uses: actions/checkout@v4
         with:
           ref: main
 
-      # workflow_dispatch → head_branch vacío → SNR_VERSION=latest (último release)
-      # workflow_run     → head_branch = tag que disparó el Release (ej. v0.1.3)
       - name: "Mostrar configuración"
         run: |
-          SNR_VERSION="${{ github.event.workflow_run.head_branch || 'latest' }}"
-          echo "Release a verificar : ${SNR_VERSION}"
+          echo "Release a verificar : ${{ inputs.release_tag || 'latest' }}"
           echo "Arquitectura        : ${{ matrix.arch }}"
           echo "Runner              : ${{ matrix.runner }}"
           echo "Docker version      : $(docker --version)"
 
-      # docker build sin --platform usa el runner nativo → TARGETARCH se infiere
-      # de uname -m en el Dockerfile (no requiere buildx ni QEMU).
       - name: "Build y test de artefactos del release"
         run: |
           docker build \
-            --build-arg SNR_VERSION="${{ github.event.workflow_run.head_branch || 'latest' }}" \
+            --build-arg SNR_VERSION="${{ inputs.release_tag || 'latest' }}" \
             --progress=plain \
             --target test-release \
             containers/test-release/
 
       - name: "✅ Release verificado"
         run: |
-          echo "Los artefactos del release ${{ github.event.workflow_run.head_branch || 'latest' }}"
+          echo "Los artefactos del release ${{ inputs.release_tag || 'latest' }}"
           echo "han sido verificados correctamente en ${{ matrix.arch }}."
