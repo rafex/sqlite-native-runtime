@@ -1,14 +1,2 @@
-# Rust build artifacts
-sqlite-native-runtime/rust/target/
-
-# Java / Maven build artifacts
-sqlite-native-runtime/java/target/
-
-# Maven wrapper Windows (no aplica — proyecto macOS/Linux)
-sqlite-native-runtime/java/mvnw.cmd
-
-*.class
-
-# OS
 .DS_Store
 *.swp
