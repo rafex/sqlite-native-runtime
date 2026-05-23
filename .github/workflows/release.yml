@@ -1,7 +1,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # release.yml — Publicación de artefactos
 #
-# Dispara en: push de un tag con patrón v* (ej. v0.1.0, v1.2.3)
+# Dispara en:
+#   • push de tag  : v{MAJOR}.{MINOR}.{PATCH}[-sufijo]  (ej. v0.1.0, v2.0.0-rc.1)
+#   • workflow_dispatch : permite relanzar manualmente cualquier tag fallido
 #
 # Artefactos publicados en el GitHub Release (12 ficheros):
 #   libsqlite_native_runtime-linux-amd64.so      ← Rust nativo, runner x86_64
@@ -10,7 +12,7 @@
 #   libsqlite_native_runtime-linux-arm64.so.sha256
 #   sqlite-native-runtime-{version}.jar          ← Java thin JAR (para Maven/Gradle)
 #   sqlite-native-runtime-{version}.jar.sha256
-#   sqlite-native-runtime-{version}-fat.jar      ← Java fat JAR  (standalone, sin deps externas)
+#   sqlite-native-runtime-{version}-fat.jar      ← Java fat JAR (standalone)
 #   sqlite-native-runtime-{version}-fat.jar.sha256
 #   snr-smoke-linux-amd64                        ← GraalVM Native Image, runner x86_64
 #   snr-smoke-linux-amd64.sha256
@@ -31,10 +33,18 @@ on:
   push:
     tags:
       # Glob semver: v{MAJOR}.{MINOR}.{PATCH} con sufijo opcional de pre-release
-      # [0-9]* = un dígito + cualquier sufijo numérico   . = punto literal
       # Válidos  : v0.1.0  v2.0.0  v10.3.21  v1.2.3-beta.1  v1.2.3-rc.2
       # Inválidos : v1  v1.2  vfoo  1.0.0  v1abc
       - 'v[0-9]*.[0-9]*.[0-9]*'
+
+  # Permite relanzar manualmente un release fallido desde la UI de GitHub Actions:
+  #   Actions → Release → Run workflow → introducir el tag (ej. v0.1.0)
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag a publicar (ej. v0.1.0)'
+        required: true
+        type: string
 
 # Necesario para crear GitHub Releases y subir assets
 permissions:
@@ -45,6 +55,9 @@ env:
   RUST_BACKTRACE: 1
   # glibc mínima garantizada por cargo-zigbuild: Ubuntu 18.04+ / Debian 10+ / RHEL 7+
   GLIBC_MIN: "2.17"
+  # Tag unificado: viene del input manual o del evento push de tag.
+  # Todos los jobs usan ${{ env.RELEASE_TAG }} (expresiones) o $RELEASE_TAG (shell).
+  RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
 
@@ -72,7 +85,10 @@ jobs:
             lib: libsqlite_native_runtime-linux-arm64.so
 
     steps:
+      # ref explícito: garantiza el commit tagueado tanto en push-tag como en workflow_dispatch
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       # Clave por runner para que amd64 y arm64 no compartan cache incompatible
       - name: Cache Cargo registry
@@ -129,6 +145,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup GraalVM JDK 25
         uses: graalvm/setup-graalvm@v1
@@ -144,11 +162,13 @@ jobs:
           key: ${{ runner.os }}-maven-${{ hashFiles('sqlite-native-runtime/java/pom.xml') }}
           restore-keys: ${{ runner.os }}-maven-
 
-      # Alinea la versión del pom.xml con el tag (v0.1.0 → 0.1.0)
+      # Alinea la versión del pom.xml con el tag (v0.1.0 → 0.1.0).
+      # Usa $RELEASE_TAG (variable de entorno del nivel workflow) en lugar de
+      # $GITHUB_REF_NAME, que en workflow_dispatch apunta al branch, no al tag.
       - name: Set pom.xml version from tag
         working-directory: sqlite-native-runtime/java
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           ./mvnw versions:set -DnewVersion="${VERSION}" -DgenerateBackupPoms=false \
             --no-transfer-progress -q
 
@@ -157,11 +177,10 @@ jobs:
         working-directory: sqlite-native-runtime/java
         run: ./mvnw package -DskipTests --no-transfer-progress
 
-      # Recoger los dos JARs con nombres explícitos para el release
       - name: Collect artifacts
         run: |
           mkdir -p dist
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${RELEASE_TAG#v}"
           cp "sqlite-native-runtime/java/target/sqlite-native-runtime-${VERSION}.jar" \
              "dist/sqlite-native-runtime-${VERSION}.jar"
           cp "sqlite-native-runtime/java/target/sqlite-native-runtime-${VERSION}-fat.jar" \
@@ -176,9 +195,6 @@ jobs:
   #
   # native-image no soporta cross-compilación: cada arquitectura compila en su
   # runner nativo. Cada variante descarga únicamente la .so de su arquitectura.
-  #
-  # Nota: GitHub Actions espera que TODOS los variants de build-rust completen
-  # antes de iniciar CUALQUIER variant de build-native (limitación de la plataforma).
   build-native:
     name: "⚡ Native Image (${{ matrix.arch }})"
     runs-on: ${{ matrix.runner }}
@@ -198,6 +214,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       # Descarga solo la .so de la arquitectura correspondiente a esta variante.
       # SqliteLibrary usa --initialize-at-run-time: la .so no se carga durante
@@ -244,13 +262,15 @@ jobs:
 
   # ── 4. Calcular SHA256 y crear el GitHub Release ──────────────────────────────
   release:
-    name: "🚀 GitHub Release ${{ github.ref_name }}"
+    name: "🚀 GitHub Release ${{ inputs.tag || github.ref_name }}"
     runs-on: ubuntu-latest
     needs: [build-rust, build-java-jar, build-native]
     steps:
-      # Necesario para leer RELEASE.md (escrito por `just tag-create`) del commit
-      # que originó el tag — contiene las release notes curadas.
+      # Checkout del commit tagueado para leer RELEASE.md curado por `just tag-create`.
+      # ref explícito es crítico en workflow_dispatch (sin él haría checkout de main).
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       # merge-multiple: true une todos los artefactos de los matrix jobs en un
       # solo directorio, sin subdirectorios por nombre de artefacto
@@ -270,19 +290,19 @@ jobs:
         run: |
           for f in *; do
             sha256sum "$f" > "${f}.sha256"
-            echo "  ✓ $(cat ${f}.sha256)"
+            echo "  ✓ $(cat "${f}.sha256")"
           done
 
-      # RELEASE.md tiene el formato:
-      #   línea 1: <!-- RELEASE_TAG: vX.Y.Z -->   (machine-readable, se omite)
-      #   resto  : cuerpo Markdown curado por `just tag-create`
+      # RELEASE.md formato:
+      #   línea 1: <!-- RELEASE_TAG: vX.Y.Z -->  (omitida)
+      #   resto  : Markdown curado por `just tag-create`
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           NOTES_FILE="$(mktemp --suffix=.md)"
           tail -n +2 RELEASE.md > "${NOTES_FILE}"
-          gh release create "${{ github.ref_name }}" \
-            --title "Release ${{ github.ref_name }}" \
+          gh release create "${RELEASE_TAG}" \
+            --title "Release ${RELEASE_TAG}" \
             --notes-file "${NOTES_FILE}" \
             artifacts/*
