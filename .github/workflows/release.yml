@@ -248,6 +248,10 @@ jobs:
     runs-on: ubuntu-latest
     needs: [build-rust, build-java-jar, build-native]
     steps:
+      # Necesario para leer RELEASE.md (escrito por `just tag-create`) del commit
+      # que originó el tag — contiene las release notes curadas.
+      - uses: actions/checkout@v4
+
       # merge-multiple: true une todos los artefactos de los matrix jobs en un
       # solo directorio, sin subdirectorios por nombre de artefacto
       - name: Download all artifacts
@@ -269,12 +273,16 @@ jobs:
             echo "  ✓ $(cat ${f}.sha256)"
           done
 
-      # --generate-notes: GitHub construye el changelog desde los commits entre tags
+      # RELEASE.md tiene el formato:
+      #   línea 1: <!-- RELEASE_TAG: vX.Y.Z -->   (machine-readable, se omite)
+      #   resto  : cuerpo Markdown curado por `just tag-create`
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
+          NOTES_FILE="$(mktemp --suffix=.md)"
+          tail -n +2 RELEASE.md > "${NOTES_FILE}"
           gh release create "${{ github.ref_name }}" \
             --title "Release ${{ github.ref_name }}" \
-            --generate-notes \
+            --notes-file "${NOTES_FILE}" \
             artifacts/*

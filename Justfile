@@ -17,6 +17,7 @@ import 'scripts/build/build.just'
 import 'scripts/test/test.just'
 import 'scripts/container/container.just'
 import 'scripts/dist/dist.just'
+import 'scripts/release/release.just'
 
 default: build
 
