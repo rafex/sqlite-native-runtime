@@ -33,6 +33,9 @@
 # ─────────────────────────────────────────────────────────────────────────────
 
 ARG SNR_VERSION=latest
+# JVM tag para las pruebas: debe ser Java 21 (el JAR lleva bytecode preview 21.0xFFFF)
+ARG JVM_TAG=21
+# GraalVM tag para la compilacion de Native Image (requiere native-image tool)
 ARG GRAALVM_TAG=25
 
 # ── Etapa 1: install.sh del release + descarga de JARs y binario nativo ───────
@@ -152,12 +155,12 @@ RUN set -e; \
 
 # ── Etapa 2: Pruebas en la JVM ────────────────────────────────────────────────
 #
-# ghcr.io/graalvm/jdk-community:25 es multi-arch (amd64 + arm64).
-# La .so instalada por install.sh se copia a /usr/local/lib/ (ruta estándar
-# de búsqueda de la JVM) y se registra con ldconfig.
-FROM ghcr.io/graalvm/jdk-community:${GRAALVM_TAG} AS test-jvm
+# El JAR usa bytecode Java 21 con flag de preview (minor_version=0xFFFF).
+# DEBE ejecutarse en Java 21 con --enable-preview.
+# Java 22+ rechazaría el bytecode con UnsupportedClassVersionError.
+FROM eclipse-temurin:21-jre AS test-jvm
 
-ARG GRAALVM_TAG
+ARG JVM_TAG
 
 WORKDIR /test
 
@@ -172,11 +175,13 @@ RUN VER="$(cat /artifacts/VERSION_NUM)"; \
     javac -cp "/artifacts/sqlite-native-runtime-${VER}.jar" Main.java
 
 # ── Test 1: thin JAR ──────────────────────────────────────────────────────────
+# --enable-preview obligatorio: el JAR tiene bytecode Java 21 preview (JEP 442)
 RUN printf "\n╔══════════════════════════════════════════╗\n" && \
     printf   "║  Test 1/4 — JVM thin JAR                ║\n" && \
     printf   "╚══════════════════════════════════════════╝\n\n" && \
     VER="$(cat /artifacts/VERSION_NUM)" && \
-    java --enable-native-access=ALL-UNNAMED \
+    java --enable-preview \
+         --enable-native-access=ALL-UNNAMED \
          -Dsnr.test.mode=JVM-thin \
          -cp "/artifacts/sqlite-native-runtime-${VER}.jar:." \
          Main
@@ -186,7 +191,8 @@ RUN printf "\n╔═════════════════════
     printf   "║  Test 2/4 — JVM fat JAR                 ║\n" && \
     printf   "╚══════════════════════════════════════════╝\n\n" && \
     VER="$(cat /artifacts/VERSION_NUM)" && \
-    java --enable-native-access=ALL-UNNAMED \
+    java --enable-preview \
+         --enable-native-access=ALL-UNNAMED \
          -Dsnr.test.mode=JVM-fat \
          -cp "/artifacts/sqlite-native-runtime-${VER}-fat.jar:." \
          Main
@@ -213,10 +219,11 @@ COPY src/Main.java ./Main.java
 RUN VER="$(cat /artifacts/VERSION_NUM)"; \
     JAR="/artifacts/sqlite-native-runtime-${VER}.jar"; \
     printf "\n>>> Compilando Main.java como Native Image (GraalVM %s)...\n\n" "${GRAALVM_TAG}"; \
-    javac -cp "${JAR}" Main.java; \
+    javac --enable-preview --release 21 -cp "${JAR}" Main.java; \
     native-image \
         --initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary \
         --enable-native-access=ALL-UNNAMED \
+        --enable-preview \
         --no-fallback \
         -H:Name=snr-release-test \
         -cp "${JAR}:." \

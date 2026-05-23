@@ -1,8 +1,11 @@
 # sqlite-native-runtime
 
-Biblioteca SQLite genérica para Java 22+ y GraalVM 25 Native Image.  
+Biblioteca SQLite genérica para Java 21 y GraalVM 25 Native Image.  
 **Rust** expone la C ABI completa de SQLite vía `libsqlite3-sys`.  
-**Java** la consume con Panama FFI (`java.lang.foreign.*`, JEP 454 — estable desde Java 22) — sin JNI, sin extracción de JARs.
+**Java** la consume con Panama FFI (`java.lang.foreign.*`, JEP 442 — preview en Java 21) — sin JNI, sin extracción de JARs.
+
+> ⚠️ **Requiere Java 21 con `--enable-preview`.** El bytecode usa el flag de preview de Java 21.
+> Java 22+ no es compatible. Ver [Instalación](docs/INSTALL.md#requisitos-previos).
 
 ## Instalación rápida
 
@@ -31,7 +34,7 @@ Java (Panama FFI)
 ```
 sqlite-native-runtime/
   rust/          Crate Rust — C ABI (cdylib + staticlib)
-  java/          Biblioteca Java Maven (Java 22, Panama FFI estable — JEP 454)
+  java/          Biblioteca Java Maven (Java 21 + --enable-preview, Panama FFI preview — JEP 442)
     src/main/java/mx/rafex/sqlite/
       SqliteLibrary.java    — bindings de bajo nivel (MethodHandle por símbolo snr_*)
       SqliteConnection.java — conexión de alto nivel (AutoCloseable)
@@ -45,7 +48,7 @@ sqlite-native-runtime/
 
 - Rust stable (aarch64-apple-darwin o x86_64-unknown-linux-gnu)
 - GraalVM JDK 25 (incluye `native-image`)
-- Java 22+ (bytecode target 22; Panama FFM es estable en JEP 454 — sin flags preview)
+- **Java 21** (bytecode target 21 + `--enable-preview`; Panama FFM era preview en JEP 442)
 - Maven 3.9+
 
 ```bash
@@ -75,9 +78,10 @@ mvn install:install-file \
 </dependency>
 ```
 
-Panama FFM requiere el flag de JVM:
+Panama FFM (preview Java 21) requiere **ambos** flags de JVM:
 
 ```
+--enable-preview
 --enable-native-access=ALL-UNNAMED
 ```
 
@@ -113,6 +117,7 @@ Flags necesarios al construir la imagen nativa del proyecto consumidor:
 ```
 --initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary
 --enable-native-access=ALL-UNNAMED
+--enable-preview
 ```
 
 Para compilar el smoke test como binario nativo (requiere GraalVM 25):

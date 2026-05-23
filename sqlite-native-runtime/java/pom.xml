@@ -11,17 +11,17 @@
   <packaging>jar</packaging>
 
   <name>sqlite-native-runtime</name>
-  <description>Binding Panama FFI para libsqlite_native_runtime — compatible con GraalVM 25 Native Image</description>
+  <description>Binding Panama FFI para libsqlite_native_runtime — requiere Java 21 con --enable-preview (JEP 442)</description>
 
   <properties>
     <!--
-      Java 22 como target de bytecode, compilado con GraalVM JDK 25.
-      Panama FFM API (java.lang.foreign.*) se estabilizo en Java 22 (JEP 454).
-      Compilar con target 21 es incompatible: en Java 21 la API era PREVIEW y
-      enable-preview solo aplica al release actual del compilador, no a releases
-      anteriores. Java 22 es el minimo compatible sin flags adicionales.
+      Java 21 LTS como target de bytecode, compilado con GraalVM JDK 25.
+      Panama FFM API (java.lang.foreign.*) estaba en PREVIEW en Java 21 (JEP 442).
+      El bytecode generado lleva el flag de preview (minor_version=0xFFFF) y SOLO
+      puede ejecutarse en Java 21 con --enable-preview.
+      NOTA: este JAR NO es compatible con Java 22+ (UnsupportedClassVersionError).
     -->
-    <java.version>22</java.version>
+    <java.version>21</java.version>
     <maven.compiler.release>${java.version}</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
@@ -45,9 +45,16 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
-        <!-- Sin compilerArgs adicionales: compilamos con GraalVM JDK 25 donde
-             Panama FFM es estable. enable-preview solo aplica al release actual
-             del JDK y no puede combinarse con un target anterior (release 21). -->
+        <configuration>
+          <!--
+            Panama FFM era PREVIEW en Java 21 (JEP 442): se requiere --enable-preview
+            tanto en compilacion como en runtime. El flag habilita la API
+            java.lang.foreign.* que en Java 22 se estabilizo (JEP 454).
+          -->
+          <compilerArgs>
+            <arg>--enable-preview</arg>
+          </compilerArgs>
+        </configuration>
       </plugin>
 
       <plugin>
@@ -62,7 +69,7 @@
             Los tests de integracion (@Tag("integration")) se excluyen del run por defecto
             — se activan con: mvn test -Pintegration
           -->
-          <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
+          <argLine>@{argLine} --enable-preview --enable-native-access=ALL-UNNAMED</argLine>
           <excludedGroups>integration</excludedGroups>
         </configuration>
       </plugin>
@@ -193,7 +200,7 @@
             <version>3.5.2</version>
             <configuration combine.self="override">
               <groups>integration</groups>
-              <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
+              <argLine>@{argLine} --enable-preview --enable-native-access=ALL-UNNAMED</argLine>
             </configuration>
           </plugin>
         </plugins>
@@ -223,6 +230,11 @@
                 <buildArg>--initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary</buildArg>
                 <!-- Panama FFM requiere acceso nativo -->
                 <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
+                <!--
+                  El bytecode usa Java 21 preview (JEP 442): el compilador AOT
+                  de GraalVM debe procesarlo con --enable-preview igual que la JVM.
+                -->
+                <buildArg>--enable-preview</buildArg>
                 <!-- Incluir test-classes en el classpath del native build -->
                 <buildArg>-cp</buildArg>
                 <buildArg>${project.build.outputDirectory}:${project.build.testOutputDirectory}</buildArg>

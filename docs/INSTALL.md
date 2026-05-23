@@ -2,11 +2,19 @@
 
 ## Requisitos previos
 
-| Requisito | Versión mínima | Notas |
+| Requisito | Versión | Notas |
 |---|---|---|
-| **Java** | 22 | Panama FFM (JEP 454) es estable desde Java 22. GraalVM JDK 25 recomendado. |
+| **Java** | **21 exactamente** | Panama FFM era Preview en Java 21 (JEP 442). **Requiere `--enable-preview`**. |
 | **OS** | Linux x86\_64 / arm64 **64-bit** | Binarios pre-compilados disponibles. macOS: compilar desde fuente. |
 | `curl` o `wget` | cualquiera | Necesario para el script de instalación. |
+
+> ⚠️ **Java 22+ no es compatible.** El bytecode incluye el flag de preview de Java 21
+> (`minor_version=0xFFFF`). Las JVMs de Java 22, 23, 24 y 25 lo rechazarán con
+> `UnsupportedClassVersionError`. Esta limitación se eliminará en una versión futura
+> con soporte JNI.
+
+> ⚠️ **`--enable-preview` es obligatorio en runtime.** Toda aplicación que use esta
+> librería debe arrancarse con el flag `--enable-preview`.
 
 La librería nativa **no requiere** SQLite instalado en el sistema — SQLite 3 está compilado dentro del `.so` (amalgamation bundled via `libsqlite3-sys`).
 
@@ -33,7 +41,7 @@ Java 22+ (requerido por Panama FFM / JEP 454) **no publica builds para arm32**. 
 curl -sS https://raw.githubusercontent.com/rafex/sqlite-native-runtime/main/scripts/release/install.sh | sh
 
 # 3. Ejecutar tu aplicación:
-java --enable-native-access=ALL-UNNAMED -jar mi-app.jar
+java --enable-preview --enable-native-access=ALL-UNNAMED -jar mi-app.jar
 ```
 
 > Si ejecutas `install.sh` en un OS 32-bit recibirás un mensaje de error claro  
@@ -42,6 +50,8 @@ java --enable-native-access=ALL-UNNAMED -jar mi-app.jar
 ---
 
 ## Instalación rápida (recomendado)
+
+> ⚠️ **Requisito:** Java 21 con `--enable-preview`. Ver [Requisitos previos](#requisitos-previos).
 
 ```sh
 curl -sS https://raw.githubusercontent.com/rafex/sqlite-native-runtime/main/scripts/release/install.sh | sh
@@ -192,29 +202,55 @@ dependencies {
 }
 ```
 
-### Flag de JVM obligatorio
+### Flags de JVM obligatorios
 
-Panama FFM requiere este flag en cualquier aplicación que use la librería:
+Esta librería usa Panama FFM en modo **preview de Java 21** (JEP 442).
+**Ambos flags son obligatorios** en cualquier aplicación que la use:
 
 ```
+--enable-preview
 --enable-native-access=ALL-UNNAMED
+```
+
+**Maven Compiler Plugin** (si tu proyecto también compila con Java 21 preview):
+```xml
+<plugin>
+  <artifactId>maven-compiler-plugin</artifactId>
+  <configuration>
+    <release>21</release>
+    <compilerArgs>
+      <arg>--enable-preview</arg>
+    </compilerArgs>
+  </configuration>
+</plugin>
 ```
 
 **Maven Surefire** (tests):
 ```xml
 <configuration>
-  <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+  <argLine>--enable-preview --enable-native-access=ALL-UNNAMED</argLine>
 </configuration>
 ```
 
 **Spring Boot** (`application.properties`):
 ```properties
-spring.jvm.arguments=--enable-native-access=ALL-UNNAMED
+spring.jvm.arguments=--enable-preview --enable-native-access=ALL-UNNAMED
+```
+
+**Spring Boot** (Maven, `pom.xml`):
+```xml
+<plugin>
+  <groupId>org.springframework.boot</groupId>
+  <artifactId>spring-boot-maven-plugin</artifactId>
+  <configuration>
+    <jvmArguments>--enable-preview --enable-native-access=ALL-UNNAMED</jvmArguments>
+  </configuration>
+</plugin>
 ```
 
 **Línea de comandos**:
 ```sh
-java --enable-native-access=ALL-UNNAMED -jar mi-app.jar
+java --enable-preview --enable-native-access=ALL-UNNAMED -jar mi-app.jar
 ```
 
 ---
@@ -232,6 +268,8 @@ Si compilas tu aplicación como Native Image, añade estos flags al plugin:
       <!-- SqliteLibrary carga la .so en el bloque static: diferir a runtime -->
       <buildArg>--initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary</buildArg>
       <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
+      <!-- Bytecode Java 21 preview: el compilador AOT también necesita el flag -->
+      <buildArg>--enable-preview</buildArg>
     </buildArgs>
   </configuration>
 </plugin>

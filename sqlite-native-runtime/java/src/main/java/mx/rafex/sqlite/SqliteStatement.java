@@ -2,7 +2,6 @@ package mx.rafex.sqlite;
 
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.ValueLayout;
-import java.nio.charset.StandardCharsets;
 
 /**
  * Prepared statement SQLite. Obtenido de {@link SqliteConnection#prepare(String)}.
@@ -240,7 +239,7 @@ public final class SqliteStatement implements AutoCloseable {
         if (ptr == null || MemorySegment.NULL.equals(ptr)) return null;
         int byteLen = SqliteLibrary.snr_column_bytes(stmt, col);
         if (byteLen <= 0) return "";
-        return ptr.reinterpret(byteLen + 1L).getString(0, StandardCharsets.UTF_8);
+        return ptr.reinterpret(byteLen + 1L).getUtf8String(0);
     }
 
     /**
@@ -334,7 +333,7 @@ public final class SqliteStatement implements AutoCloseable {
      */
     static String readInternalString(MemorySegment ptr) {
         if (ptr == null || MemorySegment.NULL.equals(ptr)) return null;
-        return ptr.reinterpret(Long.MAX_VALUE).getString(0, StandardCharsets.UTF_8);
+        return ptr.reinterpret(Long.MAX_VALUE).getUtf8String(0);
     }
 
     /** Lee un string desde un puntero transferido (llama snr_free_string). Devuelve null si es NULL. */
