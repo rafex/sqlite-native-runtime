@@ -15,9 +15,9 @@
 
   <properties>
     <!--
-      Java 21 LTS + --enable-preview: Panama FFM preview (JEP 442).
+      Java 21 LTS con flag enable-preview: Panama FFM preview (JEP 442).
       El bytecode generado (minor_version=0xFFFF) SOLO puede ejecutarse
-      en una JVM Java 21 con --enable-preview.
+      en una JVM Java 21 con la flag enable-preview.
       Para Java 25 stable ver el módulo ether-sqlite.
     -->
     <maven.compiler.release>21</maven.compiler.release>
@@ -57,7 +57,7 @@
         <version>3.5.2</version>
         <configuration>
           <!--
-            --enable-preview obligatorio en runtime: bytecode preview Java 21.
+            Flag enable-preview obligatoria en runtime: bytecode preview Java 21.
             Los tests de integracion se excluyen por defecto.
           -->
           <argLine>@{argLine} --enable-preview --enable-native-access=ALL-UNNAMED</argLine>
@@ -177,8 +177,8 @@
 
     <!--
       Perfil native: compila SmokeTest como GraalVM Native Image con bytecode Java 21 preview.
-      GraalVM AOT procesa el bytecode preview con --enable-preview.
-      El binario resultante NO requiere --enable-preview en runtime.
+      GraalVM AOT procesa el bytecode preview con la flag enable-preview.
+      El binario resultante NO requiere la flag en runtime.
       Uso: JAVA_HOME=graalvm-25 mvn -Pnative package native:compile
       Binario: target/ether-sqlite-java21
     -->
@@ -197,7 +197,7 @@
               <buildArgs>
                 <buildArg>--initialize-at-run-time=mx.rafex.ether.sqlite.SqliteLibrary</buildArg>
                 <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
-                <!-- Bytecode Java 21 preview: AOT necesita --enable-preview para procesarlo -->
+                <!-- Bytecode Java 21 preview: AOT requiere la flag enable-preview -->
                 <buildArg>--enable-preview</buildArg>
                 <buildArg>-cp</buildArg>
                 <buildArg>${project.build.outputDirectory}:${project.build.testOutputDirectory}</buildArg>

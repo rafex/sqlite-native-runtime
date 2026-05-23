@@ -15,7 +15,7 @@
 
   <properties>
     <!--
-      Java 25 LTS: Panama FFM estable (JEP 454), sin --enable-preview.
+      Java 25 LTS: Panama FFM estable (JEP 454), sin flag enable-preview.
       Para el binding Java 21 preview (JEP 442) ver el módulo ether-sqlite-java21.
     -->
     <java.version>25</java.version>
@@ -42,7 +42,7 @@
         <groupId>org.apache.maven.plugins</groupId>
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
-        <!-- Java 25: Panama FFM estable (JEP 454) — sin --enable-preview -->
+        <!-- Java 25: Panama FFM estable (JEP 454), sin flag enable-preview -->
       </plugin>
 
       <plugin>
