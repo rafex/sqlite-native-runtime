@@ -1,0 +1,6 @@
+mx/rafex/sqlite/SqliteLibrary.class
+mx/rafex/sqlite/SqliteException.class
+mx/rafex/sqlite/SqliteConnection.class
+mx/rafex/sqlite/SqliteStatement.class
+mx/rafex/sqlite/SqliteConnection$WalCheckpointResult.class
+mx/rafex/sqlite/SqliteConnection$WalMode.class

@@ -1,0 +1,15 @@
+mx/rafex/sqlite/SqliteIntegrationTest$LargeDataTest.class
+mx/rafex/sqlite/SqliteIntegrationTest$MultiConnectionWalTest.class
+mx/rafex/sqlite/SqliteIntegrationTest$SavepointNestingTest.class
+mx/rafex/sqlite/SqliteIntegrationTest$ConcurrentReadsTest.class
+mx/rafex/sqlite/SqliteIntegrationTest$StatementReuseTest.class
+mx/rafex/sqlite/SmokeTest.class
+mx/rafex/sqlite/SqliteIntegrationTest$BulkInsertTest.class
+mx/rafex/sqlite/SqliteStatementTest.class
+mx/rafex/sqlite/SqliteIntegrationTest$ConnectionPoolSimTest.class
+mx/rafex/sqlite/SqliteIntegrationTest.class
+mx/rafex/sqlite/SqliteExceptionTest.class
+mx/rafex/sqlite/SqliteConnectionTest.class
+mx/rafex/sqlite/SqliteIntegrationTest$WalCheckpointLoadTest.class
+mx/rafex/sqlite/SqliteIntegrationTest$ConcurrentWritesTest.class
+mx/rafex/sqlite/SqliteIntegrationTest$ErrorRecoveryTest.class

@@ -1,0 +1,19 @@
+# Normalización de line endings
+* text=auto
+
+# Archivos Windows que requieren CRLF
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Archivos Unix que requieren LF
+*.sh text eol=lf
+*.mk text eol=lf
+Makefile text eol=lf
+Justfile text eol=lf
+
+# Binarios
+*.so binary
+*.dylib binary
+*.dll binary
+*.jar binary
+*.class binary

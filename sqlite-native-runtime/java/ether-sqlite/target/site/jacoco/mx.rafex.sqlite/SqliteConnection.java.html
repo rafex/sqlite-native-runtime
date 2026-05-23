@@ -1,0 +1,430 @@
+<?xml version="1.0" encoding="UTF-8"?><!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Strict//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-strict.dtd"><html xmlns="http://www.w3.org/1999/xhtml" lang="es"><head><meta http-equiv="Content-Type" content="text/html;charset=UTF-8"/><link rel="stylesheet" href="../jacoco-resources/report.css" type="text/css"/><link rel="shortcut icon" href="../jacoco-resources/report.gif" type="image/gif"/><title>SqliteConnection.java</title><link rel="stylesheet" href="../jacoco-resources/prettify.css" type="text/css"/><script type="text/javascript" src="../jacoco-resources/prettify.js"></script></head><body onload="window['PR_TAB_WIDTH']=4;prettyPrint()"><div class="breadcrumb" id="breadcrumb"><span class="info"><a href="../jacoco-sessions.html" class="el_session">Sessions</a></span><a href="../index.html" class="el_report">sqlite-native-runtime</a> &gt; <a href="index.source.html" class="el_package">mx.rafex.sqlite</a> &gt; <span class="el_source">SqliteConnection.java</span></div><h1>SqliteConnection.java</h1><pre class="source lang-java linenums">package mx.rafex.sqlite;
+
+import java.lang.foreign.Arena;
+import java.lang.foreign.MemorySegment;
+import java.lang.foreign.ValueLayout;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.logging.Logger;
+
+/**
+ * Conexión SQLite de alto nivel sobre {@link SqliteLibrary}.
+ *
+ * &lt;p&gt;Implementa {@link AutoCloseable} — úsalo en try-with-resources.
+ *
+ * &lt;h2&gt;Apertura&lt;/h2&gt;
+ * &lt;pre&gt;{@code
+ * try (var db = SqliteConnection.open(&quot;/data/app.db&quot;)) {
+ *     db.exec(&quot;PRAGMA journal_mode=WAL&quot;);
+ *     // ...
+ * }
+ * }&lt;/pre&gt;
+ *
+ * &lt;h2&gt;Base de datos en memoria&lt;/h2&gt;
+ * &lt;pre&gt;{@code
+ * try (var db = SqliteConnection.memory()) {
+ *     // BD efímera, ideal para tests
+ * }
+ * }&lt;/pre&gt;
+ *
+ * &lt;h2&gt;Transacciones&lt;/h2&gt;
+ * &lt;pre&gt;{@code
+ * db.transaction(() -&gt; {
+ *     try (var stmt = db.prepare(&quot;INSERT INTO t(x) VALUES(?)&quot;)) {
+ *         stmt.bindText(1, &quot;hola&quot;).stepAndDone();
+ *     }
+ * });
+ * }&lt;/pre&gt;
+ *
+ * &lt;h2&gt;Savepoints&lt;/h2&gt;
+ * &lt;pre&gt;{@code
+ * db.withSavepoint(&quot;sp1&quot;, () -&gt; {
+ *     // operaciones que hacen rollback automático si lanzan excepción
+ * });
+ * }&lt;/pre&gt;
+ *
+ * &lt;h2&gt;WAL&lt;/h2&gt;
+ * &lt;pre&gt;{@code
+ * db.enableWal();
+ * WalCheckpointResult r = db.walCheckpoint(WalMode.TRUNCATE, null);
+ * System.out.printf(&quot;WAL frames: %d, checkpointed: %d%n&quot;, r.walFrames(), r.checkpointed());
+ * }&lt;/pre&gt;
+ */
+public final class SqliteConnection implements AutoCloseable {
+
+    /** Modo de WAL checkpoint. */
+<span class="fc" id="L55">    public enum WalMode {</span>
+<span class="fc" id="L56">        PASSIVE(0), FULL(1), RESTART(2), TRUNCATE(3);</span>
+        final int value;
+<span class="fc" id="L58">        WalMode(int v) { this.value = v; }</span>
+    }
+
+    /**
+     * Resultado de un WAL checkpoint (R-4).
+     *
+     * @param walFrames    número total de frames en el WAL antes del checkpoint
+     * @param checkpointed número de frames efectivamente copiados al fichero principal
+     */
+<span class="fc" id="L67">    public record WalCheckpointResult(int walFrames, int checkpointed) {}</span>
+
+<span class="fc" id="L69">    private static final Logger LOG = Logger.getLogger(SqliteConnection.class.getName());</span>
+
+    private final MemorySegment handle;
+<span class="fc" id="L72">    private final AtomicInteger openStatements = new AtomicInteger(0);</span>
+<span class="fc" id="L73">    private boolean closed = false;</span>
+
+<span class="fc" id="L75">    private SqliteConnection(MemorySegment handle) {</span>
+<span class="fc" id="L76">        this.handle = handle;</span>
+<span class="fc" id="L77">    }</span>
+
+    // ── Fábrica ───────────────────────────────────────────────────────────────
+
+    /**
+     * Abre (o crea) la base de datos en {@code path}.
+     * Por defecto aplica {@link SqliteLibrary#OPEN_NOFOLLOW} para rechazar symlinks.
+     *
+     * @throws SqliteException si no se puede abrir
+     */
+    public static SqliteConnection open(String path) {
+<span class="fc" id="L88">        var h = SqliteLibrary.snr_open(path, 0);</span>
+<span class="fc bfc" id="L89" title="All 2 branches covered.">        if (isNull(h)) {</span>
+<span class="fc" id="L90">            throw new SqliteException(&quot;No se pudo abrir '%s': %s&quot;.formatted(path, lastError()));</span>
+        }
+<span class="fc" id="L92">        LOG.fine(() -&gt; &quot;SQLite abierto: %s (SQLite %s)&quot;.formatted(path, sqliteVersion()));</span>
+<span class="fc" id="L93">        return new SqliteConnection(h);</span>
+    }
+
+    /**
+     * Abre (o crea) la base de datos en {@code path} con flags explícitos.
+     * Usar las constantes {@link SqliteLibrary#OPEN_READONLY}, {@link SqliteLibrary#OPEN_READWRITE},
+     * {@link SqliteLibrary#OPEN_CREATE}, {@link SqliteLibrary#OPEN_NOFOLLOW}.
+     */
+    public static SqliteConnection open(String path, int flags) {
+<span class="fc" id="L102">        var h = SqliteLibrary.snr_open(path, flags);</span>
+<span class="fc bfc" id="L103" title="All 2 branches covered.">        if (isNull(h)) {</span>
+<span class="fc" id="L104">            throw new SqliteException(&quot;No se pudo abrir '%s': %s&quot;.formatted(path, lastError()));</span>
+        }
+<span class="fc" id="L106">        return new SqliteConnection(h);</span>
+    }
+
+    /**
+     * Abre una base de datos en memoria anónima ({@code :memory:}).
+     * Los datos se pierden al cerrar la conexión.
+     */
+    public static SqliteConnection memory() {
+<span class="fc" id="L114">        var h = SqliteLibrary.snr_open_memory(null);</span>
+<span class="pc bpc" id="L115" title="1 of 2 branches missed.">        if (isNull(h)) {</span>
+<span class="nc" id="L116">            throw new SqliteException(&quot;No se pudo abrir :memory:: &quot; + lastError());</span>
+        }
+<span class="fc" id="L118">        return new SqliteConnection(h);</span>
+    }
+
+    /**
+     * Abre una base de datos en memoria con nombre compartido.
+     * Útil para compartir una BD en memoria entre múltiples conexiones en el mismo proceso.
+     */
+    public static SqliteConnection memory(String name) {
+<span class="fc" id="L126">        var h = SqliteLibrary.snr_open_memory(name);</span>
+<span class="fc bfc" id="L127" title="All 2 branches covered.">        if (isNull(h)) {</span>
+<span class="fc" id="L128">            throw new SqliteException(&quot;No se pudo abrir memoria '%s': %s&quot;.formatted(name, lastError()));</span>
+        }
+<span class="fc" id="L130">        return new SqliteConnection(h);</span>
+    }
+
+    // ── Operaciones básicas ───────────────────────────────────────────────────
+
+    /**
+     * Ejecuta una o más sentencias SQL sin resultado (DDL, PRAGMA, etc.).
+     *
+     * @throws SqliteException si SQLite reporta un error
+     */
+    public SqliteConnection exec(String sql) {
+<span class="fc" id="L141">        checkOpen();</span>
+<span class="fc bfc" id="L142" title="All 2 branches covered.">        if (SqliteLibrary.snr_exec(handle, sql) != 0) {</span>
+<span class="fc" id="L143">            throw new SqliteException(&quot;exec() falló [%s]: %s&quot;.formatted(sql, lastError()));</span>
+        }
+<span class="fc" id="L145">        return this;</span>
+    }
+
+    /**
+     * Compila SQL en un prepared statement.
+     * El statement DEBE cerrarse — úsalo en try-with-resources.
+     * Al cerrar el statement se decrementará automáticamente el contador de statements
+     * abiertos de esta conexión.
+     *
+     * @throws SqliteException si el SQL no es válido
+     */
+    public SqliteStatement prepare(String sql) {
+<span class="fc" id="L157">        checkOpen();</span>
+<span class="fc" id="L158">        var stmtHandle = SqliteLibrary.snr_prepare(handle, sql);</span>
+<span class="fc bfc" id="L159" title="All 2 branches covered.">        if (isNull(stmtHandle)) {</span>
+<span class="fc" id="L160">            throw new SqliteException(&quot;prepare() falló [%s]: %s&quot;.formatted(sql, lastError()));</span>
+        }
+<span class="fc" id="L162">        openStatements.incrementAndGet();</span>
+<span class="fc" id="L163">        return new SqliteStatement(stmtHandle, openStatements::decrementAndGet);</span>
+    }
+
+    /** Rowid de la última inserción exitosa en esta conexión. */
+    public long lastInsertRowid() {
+<span class="fc" id="L168">        checkOpen();</span>
+<span class="fc" id="L169">        return SqliteLibrary.snr_last_insert_rowid(handle);</span>
+    }
+
+    /** Filas modificadas por la última operación DML. */
+    public long changes() {
+<span class="fc" id="L174">        checkOpen();</span>
+<span class="fc" id="L175">        return SqliteLibrary.snr_changes(handle);</span>
+    }
+
+    /**
+     * Configura el busy timeout.
+     *
+     * @param ms milisegundos que SQLite esperará un lock antes de retornar SQLITE_BUSY
+     */
+    public SqliteConnection busyTimeout(int ms) {
+<span class="fc" id="L184">        checkOpen();</span>
+<span class="fc" id="L185">        SqliteLibrary.snr_set_busy_timeout(handle, ms);</span>
+<span class="fc" id="L186">        return this;</span>
+    }
+
+    /**
+     * Verifica que la conexión responde.
+     *
+     * @return {@code true} si OK
+     */
+    public boolean ping() {
+<span class="fc" id="L195">        checkOpen();</span>
+<span class="pc bpc" id="L196" title="1 of 2 branches missed.">        return SqliteLibrary.snr_ping(handle) == 1L;</span>
+    }
+
+    // ── WAL ──────────────────────────────────────────────────────────────────
+
+    /**
+     * Activa el modo WAL y configura {@code synchronous=NORMAL}.
+     * Llamar una vez tras abrir la conexión.
+     */
+    public SqliteConnection enableWal() {
+<span class="fc" id="L206">        exec(&quot;PRAGMA journal_mode=WAL&quot;);</span>
+<span class="fc" id="L207">        exec(&quot;PRAGMA synchronous=NORMAL&quot;);</span>
+<span class="fc" id="L208">        return this;</span>
+    }
+
+    /**
+     * Ejecuta un WAL checkpoint y devuelve el resultado de observabilidad (R-4).
+     *
+     * @param mode    modo del checkpoint
+     * @param dbName  nombre de la BD adjunta, o {@code null} para &quot;main&quot;
+     * @return resultado con {@code walFrames} y {@code checkpointed}
+     * @throws SqliteException en error
+     */
+    public WalCheckpointResult walCheckpoint(WalMode mode, String dbName) {
+<span class="fc" id="L220">        checkOpen();</span>
+<span class="fc" id="L221">        try (var arena = Arena.ofConfined()) {</span>
+<span class="fc" id="L222">            var outWalFrames    = arena.allocate(ValueLayout.JAVA_INT);</span>
+<span class="fc" id="L223">            var outCheckpointed = arena.allocate(ValueLayout.JAVA_INT);</span>
+<span class="fc bfc" id="L224" title="All 2 branches covered.">            if (SqliteLibrary.snr_wal_checkpoint(handle, dbName, mode.value,</span>
+                    outWalFrames, outCheckpointed) != 0) {
+<span class="fc" id="L226">                throw new SqliteException(&quot;walCheckpoint(%s) falló: %s&quot;.formatted(mode, lastError()));</span>
+            }
+<span class="fc" id="L228">            return new WalCheckpointResult(</span>
+<span class="fc" id="L229">                outWalFrames.get(ValueLayout.JAVA_INT, 0),</span>
+<span class="fc" id="L230">                outCheckpointed.get(ValueLayout.JAVA_INT, 0));</span>
+        }
+    }
+
+    /**
+     * Configura el auto-checkpoint de WAL.
+     *
+     * @param n frames de WAL; 0 para desactivar
+     */
+    public SqliteConnection walAutocheckpoint(int n) {
+<span class="fc" id="L240">        checkOpen();</span>
+<span class="fc" id="L241">        SqliteLibrary.snr_wal_autocheckpoint(handle, n);</span>
+<span class="fc" id="L242">        return this;</span>
+    }
+
+    // ── Transacciones ─────────────────────────────────────────────────────────
+
+    /** Inicia BEGIN DEFERRED. */
+    public SqliteConnection begin() {
+<span class="fc" id="L249">        checkOpen();</span>
+<span class="fc bfc" id="L250" title="All 2 branches covered.">        if (SqliteLibrary.snr_begin(handle) != 0) {</span>
+<span class="fc" id="L251">            throw new SqliteException(&quot;begin() falló: &quot; + lastError());</span>
+        }
+<span class="fc" id="L253">        return this;</span>
+    }
+
+    /** Inicia BEGIN IMMEDIATE (reserva write lock). */
+    public SqliteConnection beginImmediate() {
+<span class="fc" id="L258">        checkOpen();</span>
+<span class="fc bfc" id="L259" title="All 2 branches covered.">        if (SqliteLibrary.snr_begin_immediate(handle) != 0) {</span>
+<span class="fc" id="L260">            throw new SqliteException(&quot;beginImmediate() falló: &quot; + lastError());</span>
+        }
+<span class="fc" id="L262">        return this;</span>
+    }
+
+    /** Inicia BEGIN EXCLUSIVE. */
+    public SqliteConnection beginExclusive() {
+<span class="fc" id="L267">        checkOpen();</span>
+<span class="fc bfc" id="L268" title="All 2 branches covered.">        if (SqliteLibrary.snr_begin_exclusive(handle) != 0) {</span>
+<span class="fc" id="L269">            throw new SqliteException(&quot;beginExclusive() falló: &quot; + lastError());</span>
+        }
+<span class="fc" id="L271">        return this;</span>
+    }
+
+    /** Confirma la transacción activa. */
+    public SqliteConnection commit() {
+<span class="fc" id="L276">        checkOpen();</span>
+<span class="fc bfc" id="L277" title="All 2 branches covered.">        if (SqliteLibrary.snr_commit(handle) != 0) {</span>
+<span class="fc" id="L278">            throw new SqliteException(&quot;commit() falló: &quot; + lastError());</span>
+        }
+<span class="fc" id="L280">        return this;</span>
+    }
+
+    /** Revierte la transacción activa. */
+    public SqliteConnection rollback() {
+<span class="fc" id="L285">        checkOpen();</span>
+<span class="fc bfc" id="L286" title="All 2 branches covered.">        if (SqliteLibrary.snr_rollback(handle) != 0) {</span>
+<span class="fc" id="L287">            throw new SqliteException(&quot;rollback() falló: &quot; + lastError());</span>
+        }
+<span class="fc" id="L289">        return this;</span>
+    }
+
+    /**
+     * Ejecuta {@code work} dentro de una transacción DEFERRED.
+     * Si {@code work} lanza excepción, hace rollback automático.
+     *
+     * @param work bloque de código a ejecutar
+     */
+    public void transaction(Runnable work) {
+<span class="fc" id="L299">        begin();</span>
+        try {
+<span class="fc" id="L301">            work.run();</span>
+<span class="fc" id="L302">            commit();</span>
+<span class="fc" id="L303">        } catch (Throwable t) {</span>
+<span class="pc" id="L304">            try { rollback(); } catch (Throwable ignored) {}</span>
+<span class="fc" id="L305">            throw t;</span>
+<span class="fc" id="L306">        }</span>
+<span class="fc" id="L307">    }</span>
+
+    /**
+     * Ejecuta {@code work} dentro de una transacción IMMEDIATE.
+     */
+    public void transactionImmediate(Runnable work) {
+<span class="fc" id="L313">        beginImmediate();</span>
+        try {
+<span class="fc" id="L315">            work.run();</span>
+<span class="fc" id="L316">            commit();</span>
+<span class="fc" id="L317">        } catch (Throwable t) {</span>
+<span class="pc" id="L318">            try { rollback(); } catch (Throwable ignored) {}</span>
+<span class="fc" id="L319">            throw t;</span>
+<span class="fc" id="L320">        }</span>
+<span class="fc" id="L321">    }</span>
+
+    // ── Savepoints ───────────────────────────────────────────────────────────
+
+    /** Crea un SAVEPOINT con {@code name}. */
+    public SqliteConnection savepoint(String name) {
+<span class="fc" id="L327">        checkOpen();</span>
+<span class="pc bpc" id="L328" title="1 of 2 branches missed.">        if (SqliteLibrary.snr_savepoint(handle, name) != 0) {</span>
+<span class="nc" id="L329">            throw new SqliteException(&quot;savepoint('%s') falló: %s&quot;.formatted(name, lastError()));</span>
+        }
+<span class="fc" id="L331">        return this;</span>
+    }
+
+    /** Libera (confirma) el SAVEPOINT {@code name}. */
+    public SqliteConnection release(String name) {
+<span class="fc" id="L336">        checkOpen();</span>
+<span class="fc bfc" id="L337" title="All 2 branches covered.">        if (SqliteLibrary.snr_release(handle, name) != 0) {</span>
+<span class="fc" id="L338">            throw new SqliteException(&quot;release('%s') falló: %s&quot;.formatted(name, lastError()));</span>
+        }
+<span class="fc" id="L340">        return this;</span>
+    }
+
+    /** Revierte hasta el SAVEPOINT {@code name} (sin eliminarlo). */
+    public SqliteConnection rollbackTo(String name) {
+<span class="fc" id="L345">        checkOpen();</span>
+<span class="fc bfc" id="L346" title="All 2 branches covered.">        if (SqliteLibrary.snr_rollback_to(handle, name) != 0) {</span>
+<span class="fc" id="L347">            throw new SqliteException(&quot;rollbackTo('%s') falló: %s&quot;.formatted(name, lastError()));</span>
+        }
+<span class="fc" id="L349">        return this;</span>
+    }
+
+    /**
+     * Ejecuta {@code work} dentro de un savepoint.
+     * Si {@code work} lanza excepción, hace rollback al savepoint y lo libera.
+     *
+     * @param name nombre del savepoint
+     * @param work bloque de código a ejecutar
+     */
+    public void withSavepoint(String name, Runnable work) {
+<span class="fc" id="L360">        savepoint(name);</span>
+        try {
+<span class="fc" id="L362">            work.run();</span>
+<span class="fc" id="L363">            release(name);</span>
+<span class="fc" id="L364">        } catch (Throwable t) {</span>
+<span class="pc" id="L365">            try { rollbackTo(name); } catch (Throwable ignored) {}</span>
+<span class="pc" id="L366">            try { release(name); }   catch (Throwable ignored) {}</span>
+<span class="fc" id="L367">            throw t;</span>
+<span class="fc" id="L368">        }</span>
+<span class="fc" id="L369">    }</span>
+
+    // ── Handle raw ───────────────────────────────────────────────────────────
+
+    /**
+     * Puntero raw al Handle de Rust (para uso avanzado con SqliteLibrary directamente).
+     *
+     * @throws SqliteException si la conexión ya fue cerrada — el handle liberado
+     *         causaría use-after-free en Rust
+     */
+    public MemorySegment rawHandle() {
+<span class="fc" id="L380">        checkOpen();</span>
+<span class="fc" id="L381">        return handle;</span>
+    }
+
+    // ── AutoCloseable ────────────────────────────────────────────────────────
+
+    /**
+     * Cierra la conexión. Si hay statements abiertos creados por {@link #prepare},
+     * emite un warning — esos statements mantienen el handle Rust vivo hasta que
+     * se cierren, pero esta instancia Java ya no es utilizable.
+     */
+    @Override
+    public void close() {
+<span class="fc bfc" id="L393" title="All 2 branches covered.">        if (!closed) {</span>
+<span class="fc" id="L394">            closed = true;</span>
+<span class="fc" id="L395">            int open = openStatements.get();</span>
+<span class="fc bfc" id="L396" title="All 2 branches covered.">            if (open &gt; 0) {</span>
+<span class="fc" id="L397">                LOG.warning(&quot;[snr] conexión cerrada con &quot; + open</span>
+                    + &quot; statement(s) aún abiertos — posible resource leak. &quot;
+                    + &quot;Cierra siempre los SqliteStatement antes de SqliteConnection.&quot;);
+            }
+<span class="fc" id="L401">            SqliteLibrary.snr_close(handle);</span>
+        }
+<span class="fc" id="L403">    }</span>
+
+    // ── Utilidades estáticas ──────────────────────────────────────────────────
+
+    /** Versión de SQLite compilada en la librería nativa. */
+    public static String sqliteVersion() {
+<span class="fc" id="L409">        return SqliteStatement.readAndFreeString(SqliteLibrary.snr_sqlite_version());</span>
+    }
+
+    /**
+     * Último error del hilo actual reportado por Rust.
+     * Usa {@code snr_last_error_copy()} para ser seguro con Project Loom (R-1).
+     */
+    public static String lastError() {
+<span class="fc" id="L417">        return SqliteStatement.readAndFreeString(SqliteLibrary.snr_last_error_copy());</span>
+    }
+
+    // ── Helpers privados ──────────────────────────────────────────────────────
+
+    private void checkOpen() {
+<span class="fc bfc" id="L423" title="All 2 branches covered.">        if (closed) throw new SqliteException(&quot;Conexión ya cerrada&quot;);</span>
+<span class="fc" id="L424">    }</span>
+
+    private static boolean isNull(MemorySegment seg) {
+<span class="pc bpc" id="L427" title="1 of 4 branches missed.">        return seg == null || MemorySegment.NULL.equals(seg);</span>
+    }
+}
+</pre><div class="footer"><span class="right">Created with <a href="http://www.jacoco.org/jacoco">JaCoCo</a> 0.8.12.202403310830</span></div></body></html>
