@@ -298,9 +298,11 @@ jobs:
 
   # ── 3b. GraalVM Native Image Java 21 — matrix x86_64 / arm64 ────────────────
   #
-  # Compila ether-sqlite-java21 con el perfil java21 + native-java21.
-  # El binario resultante NO requiere --enable-preview en runtime:
-  # GraalVM AOT compila el bytecode preview a código nativo puro.
+  # GraalVM 21 no incluye ForeignFunctionsRuntime (Panama FFM en native-image
+  # se añadio en GraalVM 22). Estrategia de dos fases:
+  #   1. JDK 21 Temurin compila el bytecode preview (minor_version=0xFFFF)
+  #   2. GraalVM 25 native-image procesa las clases Java 21 con --enable-preview
+  # El binario resultante NO requiere --enable-preview en runtime.
   build-native-java21:
     name: "⚡ Native Image Java 21 (${{ matrix.arch }})"
     runs-on: ${{ matrix.runner }}
@@ -329,13 +331,12 @@ jobs:
           name: rust-lib-${{ matrix.arch }}
           path: dist
 
-      - name: Setup GraalVM JDK 21 (con native-image)
-        uses: graalvm/setup-graalvm@v1
+      # Fase 1: JDK 21 para compilacion con --enable-preview
+      - name: Setup JDK 21 Temurin (compilacion preview bytecode)
+        uses: actions/setup-java@v4
         with:
           java-version: '21'
-          distribution: 'graalvm'
-          native-image-job-reports: 'true'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
+          distribution: 'temurin'
 
       - name: Cache Maven repository
         uses: actions/cache@v4
@@ -344,12 +345,41 @@ jobs:
           key: ${{ matrix.runner }}-maven-java21-${{ hashFiles('sqlite-native-runtime/java/ether-sqlite-java21/pom.xml') }}
           restore-keys: ${{ matrix.runner }}-maven-java21-
 
-      # Módulo ether-sqlite-java21: perfil native compila con --enable-preview (AOT)
-      - name: Build GraalVM Native Image (Java 21 preview)
+      - name: Set pom.xml version from tag
+        working-directory: sqlite-native-runtime/java/ether-sqlite-java21
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          ./mvnw versions:set -DnewVersion="${VERSION}" -DgenerateBackupPoms=false \
+            --no-transfer-progress -q
+
+      - name: Compilar clases Java 21 (preview bytecode)
+        working-directory: sqlite-native-runtime/java/ether-sqlite-java21
+        run: |
+          ./mvnw package test-compile -DskipTests -Djacoco.skip=true --no-transfer-progress
+
+      # Fase 2: GraalVM 25 para native-image (tiene ForeignFunctionsRuntime)
+      - name: Setup GraalVM JDK 25 (native-image con soporte Panama FFM)
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          native-image-job-reports: 'true'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build GraalVM Native Image (bytecode Java 21 preview via GraalVM 25)
         working-directory: sqlite-native-runtime/java/ether-sqlite-java21
         env:
           ETHER_SQLITE_LIB: ${{ github.workspace }}/dist/${{ matrix.lib }}
-        run: ./mvnw -Pnative package native:compile -DskipTests --no-transfer-progress
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          native-image \
+            --no-fallback \
+            -o target/ether-sqlite-java21 \
+            --initialize-at-run-time=mx.rafex.ether.sqlite.SqliteLibrary \
+            --enable-native-access=ALL-UNNAMED \
+            --enable-preview \
+            -cp "target/ether-sqlite-java21-runtime-${VERSION}.jar:target/classes:target/test-classes" \
+            mx.rafex.ether.sqlite.SmokeTest
 
       - name: Collect artifact
         run: |

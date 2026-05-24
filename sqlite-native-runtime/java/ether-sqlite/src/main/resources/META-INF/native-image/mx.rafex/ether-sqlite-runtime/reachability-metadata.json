@@ -1,56 +1,23 @@
 {
-  "foreign": [
-    {
-      "type": "downcall",
-      "descriptor": "()long"
-    },
-    {
-      "type": "downcall",
-      "descriptor": "(long)void"
-    },
-    {
-      "type": "downcall",
-      "descriptor": "(long)long"
-    },
-    {
-      "type": "downcall",
-      "descriptor": "(long)int"
-    },
-    {
-      "type": "downcall",
-      "descriptor": "(long,int)long"
-    },
-    {
-      "type": "downcall",
-      "descriptor": "(long,int)int"
-    },
-    {
-      "type": "downcall",
-      "descriptor": "(long,int)double"
-    },
-    {
-      "type": "downcall",
-      "descriptor": "(long,long)int"
-    },
-    {
-      "type": "downcall",
-      "descriptor": "(long,long)long"
-    },
-    {
-      "type": "downcall",
-      "descriptor": "(long,int,long)int"
-    },
-    {
-      "type": "downcall",
-      "descriptor": "(long,int,double)int"
-    },
-    {
-      "type": "downcall",
-      "descriptor": "(long,int,long,int)int"
-    },
-    {
-      "type": "downcall",
-      "descriptor": "(long,long,int,long,long)int"
-    }
-  ]
+  "foreign": {
+    "downcalls": [
+      { "returnType": "ADDRESS", "parameterTypes": [] },
+      { "parameterTypes": ["ADDRESS"] },
+      { "returnType": "ADDRESS", "parameterTypes": ["ADDRESS"] },
+      { "returnType": "ADDRESS", "parameterTypes": ["ADDRESS", "JAVA_INT"] },
+      { "returnType": "ADDRESS", "parameterTypes": ["ADDRESS", "ADDRESS"] },
+      { "returnType": "JAVA_LONG", "parameterTypes": ["ADDRESS"] },
+      { "returnType": "JAVA_LONG", "parameterTypes": ["ADDRESS", "JAVA_INT"] },
+      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS"] },
+      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "ADDRESS"] },
+      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "JAVA_INT"] },
+      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "JAVA_INT", "JAVA_LONG"] },
+      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "JAVA_INT", "JAVA_DOUBLE"] },
+      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "JAVA_INT", "ADDRESS"] },
+      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "JAVA_INT", "ADDRESS", "JAVA_INT"] },
+      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "ADDRESS", "JAVA_INT", "ADDRESS", "ADDRESS"] },
+      { "returnType": "JAVA_DOUBLE", "parameterTypes": ["ADDRESS", "JAVA_INT"] }
+    ],
+    "upcalls": []
+  }
 }
