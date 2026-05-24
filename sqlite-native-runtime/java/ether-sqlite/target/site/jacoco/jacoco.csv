@@ -1,7 +1,0 @@
-GROUP,PACKAGE,CLASS,INSTRUCTION_MISSED,INSTRUCTION_COVERED,BRANCH_MISSED,BRANCH_COVERED,LINE_MISSED,LINE_COVERED,COMPLEXITY_MISSED,COMPLEXITY_COVERED,METHOD_MISSED,METHOD_COVERED
-sqlite-native-runtime,mx.rafex.sqlite,SqliteLibrary,351,1030,10,18,49,140,12,49,2,45
-sqlite-native-runtime,mx.rafex.sqlite,SqliteStatement,3,373,3,44,0,96,3,49,0,28
-sqlite-native-runtime,mx.rafex.sqlite,SqliteConnection.WalMode,0,39,0,0,0,3,0,2,0,2
-sqlite-native-runtime,mx.rafex.sqlite,SqliteException,0,9,0,0,0,4,0,2,0,2
-sqlite-native-runtime,mx.rafex.sqlite,SqliteConnection.WalCheckpointResult,0,9,0,0,0,1,0,1,0,1
-sqlite-native-runtime,mx.rafex.sqlite,SqliteConnection,27,537,4,38,2,126,4,50,0,33
