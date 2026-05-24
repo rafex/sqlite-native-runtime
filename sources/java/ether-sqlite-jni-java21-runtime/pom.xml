@@ -10,17 +10,18 @@
   <version>0.1.0</version>
   <packaging>jar</packaging>
 
-  <name>ether-sqlite-java21-runtime</name>
-  <description>Binding Panama FFI para libether_sqlite_runtime — Java 21 preview (JEP 442, --enable-preview)</description>
+  <name>ether-sqlite-jni-java21-runtime</name>
+  <description>Binding Panama FFM estable para libether_sqlite_runtime — Java 22+ (JEP 454, sin --enable-preview). Native-image viable con GraalVM 25.</description>
 
   <properties>
     <!--
-      Java 21 LTS con flag enable-preview: Panama FFM preview (JEP 442).
-      El bytecode generado (minor_version=0xFFFF) SOLO puede ejecutarse
-      en una JVM Java 21 con la flag enable-preview.
-      Para Java 25 stable ver el módulo ether-sqlite.
+      Java 22+: Panama FFM estable (JEP 454), sin flag enable-preview.
+      Bytecode class file version 66 — cargable por cualquier JVM 22+.
+      GraalVM 25 puede hacer native-image sin restricciones de preview.
+      Para Java 21 preview (JEP 442) ver el modulo ether-sqlite-java21-runtime.
+      Para Java 25 estable ver el modulo ether-sqlite-runtime.
     -->
-    <maven.compiler.release>21</maven.compiler.release>
+    <maven.compiler.release>22</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
     <!-- GraalVM Build Tools - native-maven-plugin -->
@@ -44,10 +45,8 @@
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
         <configuration>
-          <release>21</release>
-          <compilerArgs>
-            <arg>--enable-preview</arg>
-          </compilerArgs>
+          <!-- Java 22 stable FFM: no --enable-preview -->
+          <release>22</release>
         </configuration>
       </plugin>
 
@@ -57,10 +56,10 @@
         <version>3.5.2</version>
         <configuration>
           <!--
-            Flag enable-preview obligatoria en runtime: bytecode preview Java 21.
-            Los tests de integracion se excluyen por defecto.
+            Panama FFM necesita acceso nativo. JaCoCo inyecta su agente via @{argLine}.
+            Los tests de integracion (@Tag("integration")) se excluyen por defecto.
           -->
-          <argLine>@{argLine} --enable-preview --enable-native-access=ALL-UNNAMED</argLine>
+          <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
           <excludedGroups>integration</excludedGroups>
         </configuration>
       </plugin>
@@ -68,7 +67,7 @@
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>
-        <version>0.8.12</version>
+        <version>0.8.13</version>
         <executions>
           <execution>
             <id>jacoco-prepare-agent</id>
@@ -119,8 +118,8 @@
 
       <!--
         Fat JAR:
-          ether-sqlite-java21-runtime-{version}.jar      ← thin JAR
-          ether-sqlite-java21-runtime-{version}-fat.jar  ← fat JAR
+          ether-sqlite-jni-java21-runtime-{version}.jar      <- thin JAR
+          ether-sqlite-jni-java21-runtime-{version}-fat.jar  <- fat JAR
       -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -168,7 +167,7 @@
             <version>3.5.2</version>
             <configuration combine.self="override">
               <groups>integration</groups>
-              <argLine>@{argLine} --enable-preview --enable-native-access=ALL-UNNAMED</argLine>
+              <argLine>@{argLine} --enable-native-access=ALL-UNNAMED</argLine>
             </configuration>
           </plugin>
         </plugins>
@@ -176,11 +175,11 @@
     </profile>
 
     <!--
-      Perfil native: compila SmokeTest como GraalVM Native Image con bytecode Java 21 preview.
-      GraalVM AOT procesa el bytecode preview con la flag enable-preview.
-      El binario resultante NO requiere la flag en runtime.
-      Uso: JAVA_HOME=graalvm-25 mvn -Pnative package native:compile
-      Binario: target/ether-sqlite-java21
+      Perfil native: compila SmokeTest como GraalVM Native Image (Java 22 stable FFM).
+      Sin --enable-preview: bytecode class file 66.0, cargable por GraalVM 25 sin restricciones.
+      El binario resultante es nativo puro, no requiere JVM en runtime.
+      Uso: mvn -Pnative package native:compile
+      Binario: target/ether-sqlite-jni
     -->
     <profile>
       <id>native</id>
@@ -192,13 +191,11 @@
             <version>${native.maven.plugin.version}</version>
             <extensions>true</extensions>
             <configuration>
-              <imageName>ether-sqlite-java21</imageName>
+              <imageName>ether-sqlite-jni</imageName>
               <mainClass>mx.rafex.ether.sqlite.SmokeTest</mainClass>
               <buildArgs>
                 <buildArg>--initialize-at-run-time=mx.rafex.ether.sqlite.SqliteLibrary</buildArg>
                 <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
-                <!-- Bytecode Java 21 preview: AOT requiere la flag enable-preview -->
-                <buildArg>--enable-preview</buildArg>
                 <buildArg>-cp</buildArg>
                 <buildArg>${project.build.outputDirectory}:${project.build.testOutputDirectory}</buildArg>
               </buildArgs>

@@ -1,45 +1,59 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# release.yml — Publicación de artefactos
+# release.yml — Orquestador de publicacion
 #
 # Dispara en:
-#   • push de tag  : v{MAJOR}.{MINOR}.{PATCH}[-sufijo]  (ej. v0.1.0, v2.0.0-rc.1)
-#   • workflow_dispatch : permite relanzar manualmente cualquier tag fallido
+#   push de tag : v{MAJOR}.{MINOR}.{PATCH}[-sufijo]  (ej. v0.1.0, v2.0.0-rc.1)
+#   workflow_dispatch : permite relanzar manualmente cualquier tag fallido
 #
-# Artefactos publicados en el GitHub Release (21 ficheros):
-#   libether_sqlite_runtime-linux-amd64.so          ← Rust nativo, runner x86_64
-#   libether_sqlite_runtime-linux-amd64.so.sha256
-#   libether_sqlite_runtime-linux-arm64.so          ← Rust nativo, runner arm64
-#   libether_sqlite_runtime-linux-arm64.so.sha256
+# Delega la compilacion a los dos pipelines reutilizables:
+#   build-java25-native.yml  →  Rust .so + Java 25 JARs + Native Images x86_64/arm64
+#   build-java21.yml         →  Java 21 preview JAR + JNI Java 22 JAR + JNI Native Images
 #
-#   ether-sqlite-runtime-{version}.jar              ← Java 25 thin JAR (estable, sin flags extra)
-#   ether-sqlite-runtime-{version}.jar.sha256
-#   ether-sqlite-runtime-{version}-fat.jar          ← Java 25 fat JAR
-#   ether-sqlite-runtime-{version}-fat.jar.sha256
-#   ether-sqlite-java21-runtime-{version}.jar     ← Java 21 thin JAR (--enable-preview)
-#   ether-sqlite-java21-runtime-{version}.jar.sha256
-#   ether-sqlite-java21-runtime-{version}-fat.jar ← Java 21 fat JAR (--enable-preview)
-#   ether-sqlite-java21-runtime-{version}-fat.jar.sha256
+# Artefactos publicados en el GitHub Release (29 ficheros):
 #
-#   ether-sqlite-linux-amd64.bin                            ← GraalVM Native Image Java 25, x86_64
-#   ether-sqlite-linux-amd64.bin.sha256
-#   ether-sqlite-linux-arm64.bin                            ← GraalVM Native Image Java 25, arm64
-#   ether-sqlite-linux-arm64.bin.sha256
-#   ether-sqlite-java21-linux-amd64.bin                     ← GraalVM Native Image Java 21, x86_64
-#   ether-sqlite-java21-linux-amd64.bin.sha256
-#   ether-sqlite-java21-linux-arm64.bin                     ← GraalVM Native Image Java 21, arm64
-#   ether-sqlite-java21-linux-arm64.bin.sha256
+#   Rust native (.so):
+#     libether_sqlite_runtime-linux-amd64.so
+#     libether_sqlite_runtime-linux-amd64.so.sha256
+#     libether_sqlite_runtime-linux-arm64.so
+#     libether_sqlite_runtime-linux-arm64.so.sha256
 #
-#   install.sh                                       ← script de instalación de la .so
+#   Java 25 stable FFM (ether-sqlite-runtime):
+#     ether-sqlite-runtime-{version}.jar
+#     ether-sqlite-runtime-{version}.jar.sha256
+#     ether-sqlite-runtime-{version}-fat.jar
+#     ether-sqlite-runtime-{version}-fat.jar.sha256
+#
+#   Java 21 preview FFM (ether-sqlite-java21-runtime, JAR only):
+#     ether-sqlite-java21-runtime-{version}.jar
+#     ether-sqlite-java21-runtime-{version}.jar.sha256
+#     ether-sqlite-java21-runtime-{version}-fat.jar
+#     ether-sqlite-java21-runtime-{version}-fat.jar.sha256
+#
+#   JNI Java 22 stable FFM (ether-sqlite-jni-java21-runtime):
+#     ether-sqlite-jni-java21-runtime-{version}.jar
+#     ether-sqlite-jni-java21-runtime-{version}.jar.sha256
+#     ether-sqlite-jni-java21-runtime-{version}-fat.jar
+#     ether-sqlite-jni-java21-runtime-{version}-fat.jar.sha256
+#
+#   GraalVM Native Image Java 25:
+#     ether-sqlite-linux-amd64.bin
+#     ether-sqlite-linux-amd64.bin.sha256
+#     ether-sqlite-linux-arm64.bin
+#     ether-sqlite-linux-arm64.bin.sha256
+#
+#   GraalVM Native Image JNI Java 22:
+#     ether-sqlite-jni-linux-amd64.bin
+#     ether-sqlite-jni-linux-amd64.bin.sha256
+#     ether-sqlite-jni-linux-arm64.bin
+#     ether-sqlite-jni-linux-arm64.bin.sha256
+#
+#   Script:
+#     install.sh
 #
 # Grafo de dependencias:
 #
-#   build-rust  [amd64] ──┐
-#   build-rust  [arm64] ──┤──→ build-native-java25 [amd64] ──┐
-#                         └──→ build-native-java25 [arm64] ───┤
-#                         ├──→ build-native-java21 [amd64] ───┤
-#                         └──→ build-native-java21 [arm64] ───┤
-#   build-java-jar-java25 ──────────────────────────────────────┤──→ release
-#   build-java-jar-java21 ──────────────────────────────────────┘
+#   build-java25-native ──→ build-java21 ──┐
+#                       └─────────────────┴──→ release
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Release
@@ -56,255 +70,45 @@ on:
         required: true
         type: string
 
-# contents: write  — crear GitHub Releases y subir assets
-# actions:  write  — disparar verify-release.yml al terminar
+# contents: write — crear GitHub Releases y subir assets
+# actions:  write — disparar verify-release.yml al terminar
 permissions:
   contents: write
   actions: write
 
 env:
-  CARGO_TERM_COLOR: always
-  RUST_BACKTRACE: 1
-  GLIBC_MIN: "2.17"
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
 
-  # ── 1. Compilar libether_sqlite_runtime.so — matrix x86_64 / arm64 ──────────
-  build-rust:
-    name: "🦀 Rust .so (${{ matrix.arch }})"
-    runs-on: ${{ matrix.runner }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-latest
-            rust_target: x86_64-unknown-linux-gnu
-            zig_arch: x86_64
-            lib: libether_sqlite_runtime-linux-amd64.so
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-            rust_target: aarch64-unknown-linux-gnu
-            zig_arch: aarch64
-            lib: libether_sqlite_runtime-linux-arm64.so
+  # ── 1. Pipeline primario: Java 25 + Rust .so + Native Images ─────────────────
+  build-java25-native:
+    name: "Pipeline Java 25 + Native"
+    uses: ./.github/workflows/build-java25-native.yml
+    with:
+      release_tag: ${{ inputs.tag || github.ref_name }}
+    secrets: inherit
 
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
+  # ── 2. Pipeline secundario: Java 21 preview JAR + JNI Native Images ──────────
+  # Espera a build-java25-native para reutilizar sus artefactos rust-lib-{arch}.
+  # build-java21/build-rust esta desactivado en workflow_call (if: workflow_dispatch),
+  # asi que build-native-jni descarga directamente los .so del pipeline anterior.
+  build-java21:
+    name: "Pipeline Java 21 + JNI"
+    needs: build-java25-native
+    uses: ./.github/workflows/build-java21.yml
+    with:
+      release_tag: ${{ inputs.tag || github.ref_name }}
+    secrets: inherit
 
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ matrix.runner }}-cargo-${{ hashFiles('sqlite-native-runtime/rust/ether-sqlite/Cargo.lock') }}
-          restore-keys: ${{ matrix.runner }}-cargo-
-
-      - name: Install Zig (${{ matrix.zig_arch }})
-        run: |
-          ZIG_VERSION=0.13.0
-          curl -fsSL \
-            "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${{ matrix.zig_arch }}-${ZIG_VERSION}.tar.xz" \
-            -o /tmp/zig.tar.xz
-          tar -xJf /tmp/zig.tar.xz -C /tmp
-          echo "/tmp/zig-linux-${{ matrix.zig_arch }}-${ZIG_VERSION}" >> "$GITHUB_PATH"
-
-      - name: Install cargo-zigbuild
-        run: cargo install cargo-zigbuild --locked
-
-      - name: Add Rust target (${{ matrix.rust_target }})
-        run: rustup target add ${{ matrix.rust_target }}
-
-      - name: Build .so (glibc ${{ env.GLIBC_MIN }}+)
-        working-directory: sqlite-native-runtime/rust/ether-sqlite
-        run: cargo zigbuild --release --target "${{ matrix.rust_target }}.${{ env.GLIBC_MIN }}"
-
-      - name: Collect artifact
-        run: |
-          mkdir -p dist
-          cp sqlite-native-runtime/rust/ether-sqlite/target/${{ matrix.rust_target }}/release/libether_sqlite_runtime.so \
-             dist/${{ matrix.lib }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: rust-lib-${{ matrix.arch }}
-          path: dist/
-
-  # ── 2a. JARs Java 25 — Panama FFM estable (JEP 454, sin --enable-preview) ────
-  build-java-jar-java25:
-    name: "☕ Java 25 JAR (thin + fat)"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Setup GraalVM JDK 25
-        uses: graalvm/setup-graalvm@v1
-        with:
-          java-version: '25'
-          distribution: 'graalvm'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cache Maven repository
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-java25-${{ hashFiles('sqlite-native-runtime/java/ether-sqlite/pom.xml') }}
-          restore-keys: ${{ runner.os }}-maven-java25-
-
-      - name: Set pom.xml version from tag
-        working-directory: sqlite-native-runtime/java/ether-sqlite
-        run: |
-          VERSION="${RELEASE_TAG#v}"
-          ./mvnw versions:set -DnewVersion="${VERSION}" -DgenerateBackupPoms=false \
-            --no-transfer-progress -q
-
-      # Perfil por defecto: Java 25, src/main/java, sin --enable-preview
-      - name: Build Java 25 thin JAR + fat JAR
-        working-directory: sqlite-native-runtime/java/ether-sqlite
-        run: ./mvnw package -DskipTests --no-transfer-progress
-
-      - name: Collect artifacts
-        run: |
-          mkdir -p dist
-          VERSION="${RELEASE_TAG#v}"
-          cp "sqlite-native-runtime/java/ether-sqlite/target/ether-sqlite-runtime-${VERSION}.jar" \
-             "dist/ether-sqlite-runtime-${VERSION}.jar"
-          cp "sqlite-native-runtime/java/ether-sqlite/target/ether-sqlite-runtime-${VERSION}-fat.jar" \
-             "dist/ether-sqlite-runtime-${VERSION}-fat.jar"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: java-jar-java25
-          path: dist/
-
-  # ── 2b. JARs Java 21 — Panama FFM preview (JEP 442, --enable-preview) ─────────
-  build-java-jar-java21:
-    name: "☕ Java 21 JAR (thin + fat, --enable-preview)"
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Setup GraalVM JDK 21
-        uses: graalvm/setup-graalvm@v1
-        with:
-          java-version: '21'
-          distribution: 'graalvm'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cache Maven repository
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-java21-${{ hashFiles('sqlite-native-runtime/java/ether-sqlite-java21/pom.xml') }}
-          restore-keys: ${{ runner.os }}-maven-java21-
-
-      - name: Set pom.xml version from tag
-        working-directory: sqlite-native-runtime/java/ether-sqlite-java21
-        run: |
-          VERSION="${RELEASE_TAG#v}"
-          ./mvnw versions:set -DnewVersion="${VERSION}" -DgenerateBackupPoms=false \
-            --no-transfer-progress -q
-
-      # Módulo ether-sqlite-java21: --release 21, --enable-preview ya definidos en pom.xml
-      # Produce: ether-sqlite-java21-runtime-{version}.jar
-      #          ether-sqlite-java21-runtime-{version}-fat.jar
-      - name: Build Java 21 thin JAR + fat JAR
-        working-directory: sqlite-native-runtime/java/ether-sqlite-java21
-        run: ./mvnw package -DskipTests --no-transfer-progress
-
-      - name: Collect artifacts
-        run: |
-          mkdir -p dist
-          VERSION="${RELEASE_TAG#v}"
-          cp "sqlite-native-runtime/java/ether-sqlite-java21/target/ether-sqlite-java21-runtime-${VERSION}.jar" \
-             "dist/ether-sqlite-java21-runtime-${VERSION}.jar"
-          cp "sqlite-native-runtime/java/ether-sqlite-java21/target/ether-sqlite-java21-runtime-${VERSION}-fat.jar" \
-             "dist/ether-sqlite-java21-runtime-${VERSION}-fat.jar"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: java-jar-java21
-          path: dist/
-
-  # ── 3a. GraalVM Native Image Java 25 — matrix x86_64 / arm64 ────────────────
-  build-native-java25:
-    name: "⚡ Native Image Java 25 (${{ matrix.arch }})"
-    runs-on: ${{ matrix.runner }}
-    needs: build-rust
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - arch: amd64
-            runner: ubuntu-latest
-            lib: libether_sqlite_runtime-linux-amd64.so
-            binary: ether-sqlite-linux-amd64.bin
-          - arch: arm64
-            runner: ubuntu-24.04-arm
-            lib: libether_sqlite_runtime-linux-arm64.so
-            binary: ether-sqlite-linux-arm64.bin
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ env.RELEASE_TAG }}
-
-      - name: Download .so (${{ matrix.arch }})
-        uses: actions/download-artifact@v4
-        with:
-          name: rust-lib-${{ matrix.arch }}
-          path: dist
-
-      - name: Setup GraalVM JDK 25 (con native-image)
-        uses: graalvm/setup-graalvm@v1
-        with:
-          java-version: '25'
-          distribution: 'graalvm'
-          native-image-job-reports: 'true'
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Cache Maven repository
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/repository
-          key: ${{ matrix.runner }}-maven-java25-${{ hashFiles('sqlite-native-runtime/java/ether-sqlite/pom.xml') }}
-          restore-keys: ${{ matrix.runner }}-maven-java25-
-
-      # Perfil native: Java 25 stable, sin --enable-preview
-      - name: Build GraalVM Native Image (Java 25)
-        working-directory: sqlite-native-runtime/java/ether-sqlite
-        env:
-          ETHER_SQLITE_LIB: ${{ github.workspace }}/dist/${{ matrix.lib }}
-        run: ./mvnw -Pnative package native:compile -DskipTests --no-transfer-progress
-
-      - name: Collect artifact
-        run: |
-          mkdir -p out
-          cp sqlite-native-runtime/java/ether-sqlite/target/ether-sqlite out/${{ matrix.binary }}
-          chmod +x out/${{ matrix.binary }}
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: native-img-java25-${{ matrix.arch }}
-          path: out/
-
-  # ── 4. Calcular SHA256 y crear el GitHub Release ──────────────────────────────
+  # ── 3. Calcular SHA256 y crear el GitHub Release ──────────────────────────────
   release:
-    name: "🚀 GitHub Release ${{ inputs.tag || github.ref_name }}"
+    name: "GitHub Release ${{ inputs.tag || github.ref_name }}"
     runs-on: ubuntu-latest
     needs:
-      - build-rust
-      - build-java-jar-java25
-      - build-java-jar-java21
-      - build-native-java25
+      - build-java25-native
+      - build-java21
+
     steps:
       - uses: actions/checkout@v4
         with:
@@ -324,7 +128,7 @@ jobs:
         run: |
           for f in *; do
             sha256sum "$f" > "${f}.sha256"
-            echo "  ✓ $(cat "${f}.sha256")"
+            echo "  checksum: $(cat "${f}.sha256")"
           done
 
       - name: Create GitHub Release
