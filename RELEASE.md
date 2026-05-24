@@ -1,5 +1,5 @@
-<!-- RELEASE_TAG: v0.3.2 -->
-# Release v0.3.2 — 2026-05-23
+<!-- RELEASE_TAG: v0.3.3 -->
+# Release v0.3.3 — 2026-05-23
 
 ### 🔀 Otros cambios
 - fix
