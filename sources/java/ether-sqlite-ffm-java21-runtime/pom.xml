@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>mx.rafex.ether</groupId>
+  <artifactId>ether-sqlite-ffm-java21-runtime</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+
+  <name>ether-sqlite-ffm-java21-runtime</name>
+  <description>Binding Panama FFM para libether_sqlite_ffm_runtime — Java 21 preview (JEP 442, --enable-preview)</description>
+
+  <properties>
+    <!--
+      Java 21 LTS con flag enable-preview: Panama FFM preview (JEP 442).
+      El bytecode generado (minor_version=0xFFFF) SOLO puede ejecutarse
+      en una JVM Java 21 con la flag enable-preview.
+      Para Java 25 stable ver el módulo ether-sqlite.
+    -->
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!-- GraalVM Build Tools - native-maven-plugin -->
+    <native.maven.plugin.version>0.10.6</native.maven.plugin.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>mx.rafex.ether</groupId>
+      <artifactId>ether-sqlite-core</artifactId>
+      <version>0.1.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.11.4</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+        <configuration>
+          <release>21</release>
+          <compilerArgs>
+            <arg>--enable-preview</arg>
+          </compilerArgs>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.2</version>
+        <configuration>
+          <!--
+            Flag enable-preview obligatoria en runtime: bytecode preview Java 21.
+            Los tests de integracion se excluyen por defecto.
+          -->
+          <argLine>@{argLine} --enable-preview --enable-native-access=ALL-UNNAMED</argLine>
+          <excludedGroups>integration</excludedGroups>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>0.8.12</version>
+        <executions>
+          <execution>
+            <id>jacoco-prepare-agent</id>
+            <goals><goal>prepare-agent</goal></goals>
+          </execution>
+          <execution>
+            <id>jacoco-report</id>
+            <phase>test</phase>
+            <goals><goal>report</goal></goals>
+          </execution>
+          <execution>
+            <id>jacoco-check</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>LINE</counter>
+                      <value>COVEREDRATIO</value>
+                      <minimum>0.99</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+              <excludes>
+                <exclude>mx/rafex/ether/sqlite/SqliteLibrary.class</exclude>
+              </excludes>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.4.2</version>
+        <configuration>
+          <archive>
+            <manifest>
+              <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+
+      <!--
+        Fat JAR:
+          ether-sqlite-java21-runtime-{version}.jar      ← thin JAR
+          ether-sqlite-java21-runtime-{version}-fat.jar  ← fat JAR
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>shade</goal></goals>
+            <configuration>
+              <shadedArtifactAttached>true</shadedArtifactAttached>
+              <shadedClassifierName>fat</shadedClassifierName>
+              <createDependencyReducedPom>false</createDependencyReducedPom>
+              <filters>
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+    </plugins>
+  </build>
+
+  <profiles>
+
+    <!--
+      Perfil integration: activa los tests @Tag("integration").
+      Uso: mvn test -Pintegration
+    -->
+    <profile>
+      <id>integration</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <version>3.5.2</version>
+            <configuration combine.self="override">
+              <groups>integration</groups>
+              <argLine>@{argLine} --enable-preview --enable-native-access=ALL-UNNAMED</argLine>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <!--
+      Perfil native: compila SmokeTest como GraalVM Native Image con bytecode Java 21 preview.
+      GraalVM AOT procesa el bytecode preview con la flag enable-preview.
+      El binario resultante NO requiere la flag en runtime.
+      Uso: JAVA_HOME=graalvm-25 mvn -Pnative package native:compile
+      Binario: target/ether-sqlite-java21
+    -->
+    <profile>
+      <id>native</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.graalvm.buildtools</groupId>
+            <artifactId>native-maven-plugin</artifactId>
+            <version>${native.maven.plugin.version}</version>
+            <extensions>true</extensions>
+            <configuration>
+              <imageName>ether-sqlite-java21</imageName>
+              <mainClass>mx.rafex.ether.sqlite.SmokeTest</mainClass>
+              <buildArgs>
+                <buildArg>--initialize-at-run-time=mx.rafex.ether.sqlite.SqliteLibrary</buildArg>
+                <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
+                <!-- Bytecode Java 21 preview: AOT requiere la flag enable-preview -->
+                <buildArg>--enable-preview</buildArg>
+                <buildArg>-cp</buildArg>
+                <buildArg>${project.build.outputDirectory}:${project.build.testOutputDirectory}</buildArg>
+              </buildArgs>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+  </profiles>
+
+</project>

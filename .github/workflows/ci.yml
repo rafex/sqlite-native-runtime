@@ -17,7 +17,7 @@ on:
     branches: [main]
     paths:
       # Código fuente Rust y Java
-      - 'sqlite-native-runtime/**'
+      - 'sources/**'
       # Dockerfiles de test
       - 'containers/**'
       # Scripts de build/test y archivos de configuración de Make/Just
@@ -28,7 +28,7 @@ on:
       - '.github/workflows/ci.yml'
   pull_request:
     paths:
-      - 'sqlite-native-runtime/**'
+      - 'sources/**'
       - 'containers/**'
       - 'scripts/**'
       - 'Makefile'
@@ -59,7 +59,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('sqlite-native-runtime/rust/ether-sqlite/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('sources/rust/ether-sqlite/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build image and run Rust tests
@@ -76,7 +76,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('sqlite-native-runtime/java/ether-sqlite/pom.xml') }}
+          key: ${{ runner.os }}-maven-${{ hashFiles('sources/java/**/pom.xml') }}
           restore-keys: ${{ runner.os }}-maven-
 
       - name: Build image and run Java tests

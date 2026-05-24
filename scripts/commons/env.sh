@@ -28,18 +28,23 @@ CONTAINER_ENGINE="${CONTAINER_ENGINE:-podman}"
 GLIBC_MIN="${GLIBC_MIN:-2.17}"
 
 # ── Rutas derivadas ───────────────────────────────────────────────────────────
-JAVA_DIR="${ROOT}/sqlite-native-runtime/java/ether-sqlite"
-RUST_DIR="${ROOT}/sqlite-native-runtime/rust/ether-sqlite"
+JAVA_DIR="${ROOT}/sources/java/ether-sqlite-ffm-runtime"
+RUST_DIR="${ROOT}/sources/rust"
 CONTAINERS_DIR="${ROOT}/containers"
 
 CARGO="${HOME}/.rustup/toolchains/${CARGO_TOOLCHAIN}/bin/cargo"
 RUSTC="${HOME}/.rustup/toolchains/${CARGO_TOOLCHAIN}/bin/rustc"
 CARGO_BIN="${HOME}/.rustup/toolchains/${CARGO_TOOLCHAIN}/bin"
 
-ETHER_SQLITE_LIB="${ROOT}/sqlite-native-runtime/rust/ether-sqlite/target/release/libether_sqlite_runtime.dylib"
+# Librerías nativas compiladas por el workspace Rust (target compartido en sources/rust/target/)
+ETHER_SQLITE_FFM_LIB="${ROOT}/sources/rust/target/release/libether_sqlite_ffm_runtime.dylib"
+ETHER_SQLITE_JNI_LIB="${ROOT}/sources/rust/target/release/libether_sqlite_jni_runtime.dylib"
+# Alias de compatibilidad para scripts que usen ETHER_SQLITE_LIB (apunta a FFM por defecto)
+ETHER_SQLITE_LIB="${ETHER_SQLITE_FFM_LIB}"
 
 # ── Exportar todo ─────────────────────────────────────────────────────────────
 export ROOT
 export GRAALVM_HOME CARGO_TOOLCHAIN CONTAINER_ENGINE GLIBC_MIN
 export JAVA_DIR RUST_DIR CONTAINERS_DIR
-export CARGO RUSTC CARGO_BIN ETHER_SQLITE_LIB
+export CARGO RUSTC CARGO_BIN
+export ETHER_SQLITE_FFM_LIB ETHER_SQLITE_JNI_LIB ETHER_SQLITE_LIB

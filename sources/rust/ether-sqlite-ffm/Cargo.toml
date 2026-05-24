@@ -1,0 +1,14 @@
+[package]
+name        = "ether-sqlite-ffm"
+version     = "0.1.0"
+edition     = "2021"
+description = "SQLite C ABI para Java Panama FFM — expone símbolos snr_* via #[no_mangle]"
+
+[lib]
+name       = "ether_sqlite_ffm_runtime"
+crate-type = ["cdylib"]
+
+[dependencies]
+ether-sqlite-core = { path = "../ether-sqlite-core" }
+
+# Profiles are defined in the workspace root Cargo.toml

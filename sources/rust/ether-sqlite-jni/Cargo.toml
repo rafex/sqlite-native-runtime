@@ -1,0 +1,15 @@
+[package]
+name        = "ether-sqlite-jni"
+version     = "0.1.0"
+edition     = "2021"
+description = "SQLite JNI binding — expone símbolos Java_* para JNI (GraalVM native-image compatible)"
+
+[lib]
+name       = "ether_sqlite_jni_runtime"
+crate-type = ["cdylib"]
+
+[dependencies]
+ether-sqlite-core = { path = "../ether-sqlite-core" }
+jni               = "0.21"
+
+# Profiles are defined in the workspace root Cargo.toml

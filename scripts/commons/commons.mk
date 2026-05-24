@@ -13,8 +13,8 @@ CONTAINER_ENGINE ?= podman
 GLIBC_MIN        ?= 2.17
 
 # ── Rutas del proyecto ────────────────────────────────────────────────────────
-JAVA_DIR      := sqlite-native-runtime/java/ether-sqlite
-RUST_DIR      := sqlite-native-runtime/rust/ether-sqlite
+JAVA_DIR      := sources/java/ether-sqlite-ffm-runtime
+RUST_DIR      := sources/rust
 CONTAINERS_DIR := containers
 SCRIPTS_DIR   := scripts
 

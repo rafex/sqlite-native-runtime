@@ -13,11 +13,13 @@ PLATFORM="${1:-all}"
 
 build_target() {
   local triple="$1"
-  echo "→ zigbuild --target ${triple}.${GLIBC_MIN}"
+  echo "→ zigbuild --workspace --target ${triple}.${GLIBC_MIN}"
   cd "$RUST_DIR"
   PATH="${CARGO_BIN}:${PATH}" \
-    "$CARGO" zigbuild --release --target "${triple}.${GLIBC_MIN}"
-  echo "Librería: ${RUST_DIR}/target/${triple}/release/libether_sqlite_runtime.so"
+    "$CARGO" zigbuild --workspace --release --target "${triple}.${GLIBC_MIN}"
+  echo "Librerías:"
+  echo "  ${RUST_DIR}/target/${triple}/release/libether_sqlite_ffm_runtime.so"
+  echo "  ${RUST_DIR}/target/${triple}/release/libether_sqlite_jni_runtime.so"
 }
 
 case "$PLATFORM" in

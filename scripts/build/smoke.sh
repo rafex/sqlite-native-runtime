@@ -9,4 +9,4 @@ ETHER_SQLITE_LIB="$ETHER_SQLITE_LIB" \
     --enable-native-access=ALL-UNNAMED \
     -cp target/classes:target/test-classes \
     -ea \
-    mx.rafex.sqlite.SmokeTest
+    mx.rafex.ether.sqlite.SmokeTest

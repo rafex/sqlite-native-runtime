@@ -1,19 +1,23 @@
 #!/usr/bin/env sh
 # ─────────────────────────────────────────────────────────────────────────────
-# install.sh — Instala libether_sqlite_runtime en Linux (amd64 / arm64)
+# install.sh — Instala la librería nativa sqlite en Linux (amd64 / arm64)
 #
-# Uso rápido (última versión):
+# Uso rápido (última versión, binding FFM por defecto):
 #   curl -sS https://raw.githubusercontent.com/rafex/sqlite-native-runtime/main/scripts/release/install.sh | sh
 #
 # Versión específica:
 #   ETHER_SQLITE_VERSION=v0.1.1 curl -sS ...url.../install.sh | sh
 #
+# Seleccionar binding:
+#   ETHER_SQLITE_BINDING=ffm  (defecto) → libether_sqlite_ffm_runtime  (Java 25 Panama FFM)
+#   ETHER_SQLITE_BINDING=jni           → libether_sqlite_jni_runtime   (JNI, Java 21+)
+#
 # Forzar instalación en directorio de usuario (sin sudo):
 #   SNR_USER_INSTALL=1 curl -sS ...url.../install.sh | sh
 #
 # Lógica de instalación:
-#   Con sudo  → /usr/local/lib/libether_sqlite_runtime.so  (auto-detectado por la JVM)
-#   Sin sudo  → ~/.local/lib/libether_sqlite_runtime.so   (auto-detectado por la JVM ≥0.1.1)
+#   Con sudo  → /usr/local/lib/libether_sqlite_ffm_runtime.so  (auto-detectado por la JVM)
+#   Sin sudo  → ~/.local/lib/libether_sqlite_ffm_runtime.so   (auto-detectado por la JVM)
 #              + export ETHER_SQLITE_LIB añadido al shell rc del usuario
 # ─────────────────────────────────────────────────────────────────────────────
 set -e
@@ -59,7 +63,8 @@ case "$OS" in
         echo "    cd sqlite-native-runtime"
         echo "    make build-rust"
         echo "    # La librería queda en:"
-        echo "    # sqlite-native-runtime/rust/ether-sqlite/target/release/libether_sqlite_runtime.dylib"
+        echo "    # sources/rust/target/release/libether_sqlite_ffm_runtime.dylib"
+        echo "    # sources/rust/target/release/libether_sqlite_jni_runtime.dylib"
         echo ""
         exit 0
         ;;
@@ -100,8 +105,16 @@ case "$ARCH" in
         ;;
 esac
 
-LIB_ARTIFACT="libether_sqlite_runtime-${LIB_ARCH}.so"
-LIB_FILE="libether_sqlite_runtime.so"
+# ── Seleccionar binding ───────────────────────────────────────────────────────
+BINDING="${ETHER_SQLITE_BINDING:-ffm}"
+case "$BINDING" in
+    ffm) LIB_BASE="libether_sqlite_ffm_runtime" ;;
+    jni) LIB_BASE="libether_sqlite_jni_runtime"  ;;
+    *)   die "ETHER_SQLITE_BINDING inválido: '${BINDING}'. Usa 'ffm' o 'jni'." ;;
+esac
+
+LIB_ARTIFACT="${LIB_BASE}-${LIB_ARCH}.so"
+LIB_FILE="${LIB_BASE}.so"
 
 # ── Detectar versión ─────────────────────────────────────────────────────────
 if [ -n "${ETHER_SQLITE_VERSION:-}" ]; then
@@ -139,7 +152,7 @@ DEST="${INSTALL_DIR}/${LIB_FILE}"
 
 # ── Resumen ───────────────────────────────────────────────────────────────────
 echo ""
-info "ether-sqlite-runtime — instalador"
+info "ether-sqlite-${BINDING}-runtime — instalador"
 echo "  Versión     : ${VERSION}"
 echo "  Artefacto   : ${LIB_ARTIFACT}"
 echo "  Destino     : ${DEST}"

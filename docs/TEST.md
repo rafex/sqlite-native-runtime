@@ -111,7 +111,7 @@ make coverage     # tests + reporte JaCoCo HTML
 Umbral configurado: `LINE ≥ 0.99` (no 1.00 — 2 líneas genuinamente no testeables
 documentadas en `pom.xml`).
 
-Reporte HTML: `sqlite-native-runtime/java/target/site/jacoco/index.html`
+Reporte HTML: `sources/java/ether-sqlite-runtime/target/site/jacoco/index.html`
 
 ### Distribución de tests
 

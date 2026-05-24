@@ -1,0 +1,210 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# build-java-jni.yml — Pipeline JNI: Java 21 JAR + GraalVM Native Image
+#
+# Dispara en:
+#   workflow_call  : invocado por release.yml (pasa release_tag y jni_version)
+#   workflow_dispatch : ejecucion manual
+#
+# Inputs:
+#   release_tag  : tag/version del release Java (ej. v0.1.0). Vacio = version del pom.xml
+#   jni_version  : version del .so JNI en GHCR (ej. 0.1.0).
+#                  Si se omite, intenta descargar rust-jni-lib-{arch} del mismo run
+#                  (util cuando build-rust.yml corrio antes en el mismo workflow).
+#
+# Obtencion del .so de libether_sqlite_jni_runtime:
+#   jni_version definido → oras pull ghcr.io/{owner}/ether-sqlite-jni:{version}-{arch}
+#   jni_version vacio    → actions/download-artifact rust-jni-lib-{arch} (mismo run)
+#
+# Una linea de artefactos:
+#
+#   JNI Java 21 (ether-sqlite-jni-runtime):
+#     JAR thin + fat + GraalVM Native Image (amd64, arm64)
+#     JNI real (Java_* functions). Compatible con GraalVM native-image sin
+#     flag enable-preview ni enable-native-access. Bytecode Java 21 (class 65.0).
+#
+# Jobs:
+#   build-jni-jar   [ubuntu-latest] → java-jni-jar
+#   build-native-jni [amd64, arm64] → native-img-jni-{arch}
+#
+# Grafo:
+#   build-jni-jar  (independiente)
+#   build-native-jni (independiente — descarga .so via GHCR o artifact)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Build Java JNI
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'Tag del release (ej. v0.1.0). Vacio = version actual del pom.xml'
+        required: false
+        type: string
+        default: ''
+      jni_version:
+        description: 'Version del .so JNI en GHCR (ej. 0.1.0). Vacio = mismo run'
+        required: false
+        type: string
+        default: ''
+
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag del release (ej. v0.1.0). Vacio = version actual del pom.xml'
+        required: false
+        type: string
+        default: ''
+      jni_version:
+        description: 'Version del .so JNI en GHCR (ej. 0.1.0). Vacio = mismo run'
+        required: false
+        type: string
+        default: ''
+
+env:
+  REGISTRY: ghcr.io
+  JNI_IMAGE: ${{ github.repository_owner }}/ether-sqlite-jni
+
+jobs:
+
+  # ── 1. JARs JNI Java 21 (sin enable-preview) ─────────────────────────────────
+  build-jni-jar:
+    name: "JNI Java 21 JAR (thin + fat)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup GraalVM JDK 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-jni-${{ hashFiles('sources/java/ether-sqlite-jni-runtime/pom.xml', 'sources/java/ether-sqlite-core/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-jni-
+
+      - name: Set pom.xml versions from tag
+        if: inputs.release_tag != ''
+        run: |
+          VERSION="${{ inputs.release_tag }}"
+          VERSION="${VERSION#v}"
+          ./mvnw versions:set -f sources/java/ether-sqlite-core/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+          ./mvnw versions:set -f sources/java/ether-sqlite-jni-runtime/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+
+      - name: Build + install ether-sqlite-core
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+
+      - name: Build JNI Java 21 thin JAR + fat JAR
+        working-directory: sources/java/ether-sqlite-jni-runtime
+        run: ./mvnw package -DskipTests --no-transfer-progress
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          VERSION=$(./mvnw -f sources/java/ether-sqlite-jni-runtime/pom.xml \
+            help:evaluate -Dexpression=project.version -q -DforceStdout)
+          cp "sources/java/ether-sqlite-jni-runtime/target/ether-sqlite-jni-runtime-${VERSION}.jar" \
+             "dist/ether-sqlite-jni-runtime-${VERSION}.jar"
+          cp "sources/java/ether-sqlite-jni-runtime/target/ether-sqlite-jni-runtime-${VERSION}-fat.jar" \
+             "dist/ether-sqlite-jni-runtime-${VERSION}-fat.jar"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: java-jni-jar
+          path: dist/
+
+  # ── 2. GraalVM Native Image JNI Java 21 — matrix x86_64 / arm64 ──────────────
+  build-native-jni:
+    name: "Native Image JNI (${{ matrix.arch }})"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            lib: libether_sqlite_jni_runtime-linux-amd64.so
+            binary: ether-sqlite-jni-linux-amd64.bin
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            lib: libether_sqlite_jni_runtime-linux-arm64.so
+            binary: ether-sqlite-jni-linux-arm64.bin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Obtencion del .so: GHCR (si jni_version definido) ──
+      - name: Setup ORAS
+        if: inputs.jni_version != ''
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        if: inputs.jni_version != ''
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Pull .so from GHCR (${{ inputs.jni_version }}-${{ matrix.arch }})
+        if: inputs.jni_version != ''
+        run: |
+          mkdir -p dist
+          cd dist
+          oras pull "${{ env.REGISTRY }}/${{ env.JNI_IMAGE }}:${{ inputs.jni_version }}-${{ matrix.arch }}"
+
+      # ── Obtencion del .so: artifact del mismo run (si jni_version vacio) ──
+      - name: Download .so from artifact (mismo run)
+        if: inputs.jni_version == ''
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-jni-lib-${{ matrix.arch }}
+          path: dist
+
+      - name: Setup GraalVM JDK 25 (con native-image)
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          native-image-job-reports: 'true'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ matrix.runner }}-maven-jni-native-${{ hashFiles('sources/java/ether-sqlite-jni-runtime/pom.xml', 'sources/java/ether-sqlite-core/pom.xml') }}
+          restore-keys: ${{ matrix.runner }}-maven-jni-native-
+
+      - name: Set pom.xml versions from tag
+        if: inputs.release_tag != ''
+        run: |
+          VERSION="${{ inputs.release_tag }}"
+          VERSION="${VERSION#v}"
+          ./mvnw versions:set -f sources/java/ether-sqlite-core/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+          ./mvnw versions:set -f sources/java/ether-sqlite-jni-runtime/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+
+      - name: Build + install ether-sqlite-core
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+
+      - name: Build GraalVM Native Image (JNI Java 21)
+        working-directory: sources/java/ether-sqlite-jni-runtime
+        env:
+          ETHER_SQLITE_JNI_LIB: ${{ github.workspace }}/dist/${{ matrix.lib }}
+        run: ./mvnw -Pnative package native:compile -DskipTests --no-transfer-progress
+
+      - name: Collect artifact
+        run: |
+          mkdir -p out
+          cp sources/java/ether-sqlite-jni-runtime/target/ether-sqlite-jni out/${{ matrix.binary }}
+          chmod +x out/${{ matrix.binary }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-img-jni-${{ matrix.arch }}
+          path: out/

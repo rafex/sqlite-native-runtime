@@ -60,7 +60,7 @@ DOCKERFILE_DIR="${REPO_ROOT}/containers/test-release"
     || die "No se encontró Dockerfile en ${DOCKERFILE_DIR}"
 
 echo ""
-info "ether-sqlite-runtime — test de artefactos del release"
+info "ether-sqlite — test de artefactos del release"
 echo "  Versión   : ${ETHER_SQLITE_VERSION}"
 echo "  Plataforma: ${PLATFORM}"
 echo "  Engine    : ${CONTAINER_ENGINE}"

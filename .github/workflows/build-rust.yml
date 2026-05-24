@@ -1,0 +1,242 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# build-rust.yml — Compilacion y publicacion independiente de las librerias Rust
+#
+# Dispara en:
+#   push de tag : rust-ffm-v{MAJOR}.{MINOR}.{PATCH}  (ej. rust-ffm-v0.1.0)
+#                 rust-jni-v{MAJOR}.{MINOR}.{PATCH}  (ej. rust-jni-v0.1.0)
+#   workflow_dispatch : ejecucion manual (ffm_version y/o jni_version)
+#
+# Publica en GHCR un artefacto OCI por libreria y arquitectura:
+#   ghcr.io/{owner}/ether-sqlite-ffm:{version}-{arch}  -> libether_sqlite_ffm_runtime.so
+#   ghcr.io/{owner}/ether-sqlite-jni:{version}-{arch}  -> libether_sqlite_jni_runtime.so
+#
+# Los pipelines Java referencian estos paquetes via FFM_VERSION y JNI_VERSION.
+# Los archivos FFM_VERSION y JNI_VERSION en la raiz del repo indican la version activa.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Build Rust
+
+on:
+  push:
+    tags:
+      - 'rust-ffm-v[0-9]*.[0-9]*.[0-9]*'
+      - 'rust-jni-v[0-9]*.[0-9]*.[0-9]*'
+
+  workflow_dispatch:
+    inputs:
+      ffm_version:
+        description: 'Version FFM a publicar (ej. 0.1.0). Vacio = omitir'
+        required: false
+        type: string
+        default: ''
+      jni_version:
+        description: 'Version JNI a publicar (ej. 0.1.0). Vacio = omitir'
+        required: false
+        type: string
+        default: ''
+
+permissions:
+  packages: write
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  GLIBC_MIN: "2.17"
+  REGISTRY: ghcr.io
+
+jobs:
+
+  # ── Determinar que crates construir ─────────────────────────────────────────
+  determine:
+    name: "Determinar versiones"
+    runs-on: ubuntu-latest
+    outputs:
+      build_ffm: ${{ steps.det.outputs.build_ffm }}
+      build_jni: ${{ steps.det.outputs.build_jni }}
+      ffm_version: ${{ steps.det.outputs.ffm_version }}
+      jni_version: ${{ steps.det.outputs.jni_version }}
+
+    steps:
+      - name: Determinar que construir
+        id: det
+        run: |
+          TAG="${{ github.ref_name }}"
+          FFM_VERSION="${{ inputs.ffm_version }}"
+          JNI_VERSION="${{ inputs.jni_version }}"
+
+          # Si es un tag push, extraer version del tag
+          if [[ "$TAG" == rust-ffm-v* ]]; then
+            FFM_VERSION="${TAG#rust-ffm-v}"
+          elif [[ "$TAG" == rust-jni-v* ]]; then
+            JNI_VERSION="${TAG#rust-jni-v}"
+          fi
+
+          BUILD_FFM="false"
+          BUILD_JNI="false"
+          [ -n "$FFM_VERSION" ] && BUILD_FFM="true"
+          [ -n "$JNI_VERSION" ] && BUILD_JNI="true"
+
+          echo "build_ffm=${BUILD_FFM}" >> $GITHUB_OUTPUT
+          echo "build_jni=${BUILD_JNI}"  >> $GITHUB_OUTPUT
+          echo "ffm_version=${FFM_VERSION}" >> $GITHUB_OUTPUT
+          echo "jni_version=${JNI_VERSION}"  >> $GITHUB_OUTPUT
+
+          echo "FFM: BUILD=${BUILD_FFM} VERSION=${FFM_VERSION}"
+          echo "JNI: BUILD=${BUILD_JNI} VERSION=${JNI_VERSION}"
+
+  # ── Build + publish FFM crate ────────────────────────────────────────────────
+  build-ffm:
+    name: "FFM .so + GHCR (${{ matrix.arch }})"
+    needs: determine
+    if: needs.determine.outputs.build_ffm == 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+            zig_arch: x86_64
+            lib: libether_sqlite_ffm_runtime-linux-amd64.so
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            zig_arch: aarch64
+            lib: libether_sqlite_ffm_runtime-linux-arm64.so
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ matrix.runner }}-cargo-ffm-${{ hashFiles('sources/rust/Cargo.lock') }}
+          restore-keys: ${{ matrix.runner }}-cargo-ffm-
+
+      - name: Install Zig (${{ matrix.zig_arch }})
+        run: |
+          ZIG_VERSION=0.13.0
+          curl -fsSL \
+            "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${{ matrix.zig_arch }}-${ZIG_VERSION}.tar.xz" \
+            -o /tmp/zig.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C /tmp
+          echo "/tmp/zig-linux-${{ matrix.zig_arch }}-${ZIG_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild --locked
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Build libether_sqlite_ffm_runtime.so (glibc ${{ env.GLIBC_MIN }}+)
+        working-directory: sources/rust
+        run: cargo zigbuild -p ether-sqlite-ffm --release --target "${{ matrix.rust_target }}.${{ env.GLIBC_MIN }}"
+
+      - name: Collect .so
+        run: |
+          mkdir -p dist
+          cp sources/rust/target/${{ matrix.rust_target }}/release/libether_sqlite_ffm_runtime.so \
+             dist/${{ matrix.lib }}
+
+      - name: Setup ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Push FFM .so to GHCR
+        working-directory: dist
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-ffm:${{ needs.determine.outputs.ffm_version }}-${{ matrix.arch }}"
+          oras push "$IMAGE" "${{ matrix.lib }}:application/octet-stream"
+          echo "Publicado: ${IMAGE}"
+
+      - name: Upload artifact (reutilizacion en el mismo run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-ffm-lib-${{ matrix.arch }}
+          path: dist/
+
+  # ── Build + publish JNI crate ────────────────────────────────────────────────
+  build-jni:
+    name: "JNI .so + GHCR (${{ matrix.arch }})"
+    needs: determine
+    if: needs.determine.outputs.build_jni == 'true'
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+            zig_arch: x86_64
+            lib: libether_sqlite_jni_runtime-linux-amd64.so
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            zig_arch: aarch64
+            lib: libether_sqlite_jni_runtime-linux-arm64.so
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ matrix.runner }}-cargo-jni-${{ hashFiles('sources/rust/Cargo.lock') }}
+          restore-keys: ${{ matrix.runner }}-cargo-jni-
+
+      - name: Install Zig (${{ matrix.zig_arch }})
+        run: |
+          ZIG_VERSION=0.13.0
+          curl -fsSL \
+            "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${{ matrix.zig_arch }}-${ZIG_VERSION}.tar.xz" \
+            -o /tmp/zig.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C /tmp
+          echo "/tmp/zig-linux-${{ matrix.zig_arch }}-${ZIG_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild --locked
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Build libether_sqlite_jni_runtime.so (glibc ${{ env.GLIBC_MIN }}+)
+        working-directory: sources/rust
+        run: cargo zigbuild -p ether-sqlite-jni --release --target "${{ matrix.rust_target }}.${{ env.GLIBC_MIN }}"
+
+      - name: Collect .so
+        run: |
+          mkdir -p dist
+          cp sources/rust/target/${{ matrix.rust_target }}/release/libether_sqlite_jni_runtime.so \
+             dist/${{ matrix.lib }}
+
+      - name: Setup ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Push JNI .so to GHCR
+        working-directory: dist
+        run: |
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-jni:${{ needs.determine.outputs.jni_version }}-${{ matrix.arch }}"
+          oras push "$IMAGE" "${{ matrix.lib }}:application/octet-stream"
+          echo "Publicado: ${IMAGE}"
+
+      - name: Upload artifact (reutilizacion en el mismo run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-jni-lib-${{ matrix.arch }}
+          path: dist/

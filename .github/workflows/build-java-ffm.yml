@@ -1,0 +1,269 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# build-java-ffm.yml — Pipeline FFM: Java 25 stable + Java 21 preview
+#
+# Dispara en:
+#   workflow_call  : invocado por release.yml (pasa release_tag y ffm_version)
+#   workflow_dispatch : ejecucion manual
+#
+# Inputs:
+#   release_tag  : tag/version del release Java (ej. v0.1.0). Vacio = version del pom.xml
+#   ffm_version  : version del .so FFM en GHCR (ej. 0.1.0).
+#                  Si se omite, intenta descargar rust-ffm-lib-{arch} del mismo run
+#                  (util cuando build-rust.yml corrio antes en el mismo workflow).
+#
+# Obtencion del .so de libether_sqlite_ffm_runtime:
+#   ffm_version definido → oras pull ghcr.io/{owner}/ether-sqlite-ffm:{version}-{arch}
+#   ffm_version vacio    → actions/download-artifact rust-ffm-lib-{arch} (mismo run)
+#
+# Tres lineas de artefactos:
+#
+#   A) Java 25 stable FFM (ether-sqlite-ffm-runtime):
+#      JAR thin + fat + GraalVM Native Image (amd64, arm64)
+#      Panama FFM estable (JEP 454). Compatible con GraalVM native-image.
+#
+#   B) Java 21 preview FFM (ether-sqlite-ffm-java21-runtime):
+#      JAR thin + fat ONLY. Bytecode 65.65535 (minor=0xFFFF).
+#      NO es viable como native-image: bytecode preview bloquea GraalVM.
+#
+# Jobs:
+#   build-ffm25-jar     [ubuntu-latest]         → java-jar-ffm25
+#   build-ffm21-jar     [ubuntu-latest, JDK 21] → java-jar-ffm21
+#   build-native-ffm    [amd64, arm64]          → native-img-ffm25-{arch}
+#
+# Grafo:
+#   build-ffm25-jar  (independiente)
+#   build-ffm21-jar  (independiente)
+#   build-native-ffm (independiente — descarga .so via GHCR o artifact)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Build Java FFM
+
+on:
+  workflow_call:
+    inputs:
+      release_tag:
+        description: 'Tag del release (ej. v0.1.0). Vacio = version actual del pom.xml'
+        required: false
+        type: string
+        default: ''
+      ffm_version:
+        description: 'Version del .so FFM en GHCR (ej. 0.1.0). Vacio = mismo run'
+        required: false
+        type: string
+        default: ''
+
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag del release (ej. v0.1.0). Vacio = version actual del pom.xml'
+        required: false
+        type: string
+        default: ''
+      ffm_version:
+        description: 'Version del .so FFM en GHCR (ej. 0.1.0). Vacio = mismo run'
+        required: false
+        type: string
+        default: ''
+
+env:
+  REGISTRY: ghcr.io
+  FFM_IMAGE: ${{ github.repository_owner }}/ether-sqlite-ffm
+
+jobs:
+
+  # ── 1. JARs Java 25 — Panama FFM estable (JEP 454, sin enable-preview) ───────
+  build-ffm25-jar:
+    name: "Java 25 FFM JAR (thin + fat)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup GraalVM JDK 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-ffm25-${{ hashFiles('sources/java/ether-sqlite-ffm-runtime/pom.xml', 'sources/java/ether-sqlite-core/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-ffm25-
+
+      - name: Set pom.xml versions from tag
+        if: inputs.release_tag != ''
+        run: |
+          VERSION="${{ inputs.release_tag }}"
+          VERSION="${VERSION#v}"
+          ./mvnw versions:set -f sources/java/ether-sqlite-core/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+          ./mvnw versions:set -f sources/java/ether-sqlite-ffm-runtime/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+
+      - name: Build + install ether-sqlite-core
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+
+      - name: Build Java 25 FFM thin JAR + fat JAR
+        working-directory: sources/java/ether-sqlite-ffm-runtime
+        run: ./mvnw package -DskipTests --no-transfer-progress
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          VERSION=$(./mvnw -f sources/java/ether-sqlite-ffm-runtime/pom.xml \
+            help:evaluate -Dexpression=project.version -q -DforceStdout)
+          cp "sources/java/ether-sqlite-ffm-runtime/target/ether-sqlite-ffm-runtime-${VERSION}.jar" \
+             "dist/ether-sqlite-ffm-runtime-${VERSION}.jar"
+          cp "sources/java/ether-sqlite-ffm-runtime/target/ether-sqlite-ffm-runtime-${VERSION}-fat.jar" \
+             "dist/ether-sqlite-ffm-runtime-${VERSION}-fat.jar"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: java-jar-ffm25
+          path: dist/
+
+  # ── 2. JARs Java 21 preview — Panama FFM preview (JEP 442, enable-preview) ───
+  build-ffm21-jar:
+    name: "Java 21 FFM JAR (thin + fat, preview)"
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup GraalVM JDK 21
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '21'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-ffm21-${{ hashFiles('sources/java/ether-sqlite-ffm-java21-runtime/pom.xml', 'sources/java/ether-sqlite-core/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-ffm21-
+
+      - name: Set pom.xml versions from tag
+        if: inputs.release_tag != ''
+        run: |
+          VERSION="${{ inputs.release_tag }}"
+          VERSION="${VERSION#v}"
+          ./mvnw versions:set -f sources/java/ether-sqlite-core/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+          ./mvnw versions:set -f sources/java/ether-sqlite-ffm-java21-runtime/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+
+      - name: Build + install ether-sqlite-core
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+
+      - name: Build Java 21 FFM thin JAR + fat JAR
+        working-directory: sources/java/ether-sqlite-ffm-java21-runtime
+        run: ./mvnw package -DskipTests --no-transfer-progress
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          VERSION=$(./mvnw -f sources/java/ether-sqlite-ffm-java21-runtime/pom.xml \
+            help:evaluate -Dexpression=project.version -q -DforceStdout)
+          cp "sources/java/ether-sqlite-ffm-java21-runtime/target/ether-sqlite-ffm-java21-runtime-${VERSION}.jar" \
+             "dist/ether-sqlite-ffm-java21-runtime-${VERSION}.jar"
+          cp "sources/java/ether-sqlite-ffm-java21-runtime/target/ether-sqlite-ffm-java21-runtime-${VERSION}-fat.jar" \
+             "dist/ether-sqlite-ffm-java21-runtime-${VERSION}-fat.jar"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: java-jar-ffm21
+          path: dist/
+
+  # ── 3. GraalVM Native Image FFM Java 25 — matrix x86_64 / arm64 ──────────────
+  build-native-ffm:
+    name: "Native Image FFM Java 25 (${{ matrix.arch }})"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            lib: libether_sqlite_ffm_runtime-linux-amd64.so
+            binary: ether-sqlite-ffm-linux-amd64.bin
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            lib: libether_sqlite_ffm_runtime-linux-arm64.so
+            binary: ether-sqlite-ffm-linux-arm64.bin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Obtencion del .so: GHCR (si ffm_version definido) ──
+      - name: Setup ORAS
+        if: inputs.ffm_version != ''
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        if: inputs.ffm_version != ''
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Pull .so from GHCR (${{ inputs.ffm_version }}-${{ matrix.arch }})
+        if: inputs.ffm_version != ''
+        run: |
+          mkdir -p dist
+          cd dist
+          oras pull "${{ env.REGISTRY }}/${{ env.FFM_IMAGE }}:${{ inputs.ffm_version }}-${{ matrix.arch }}"
+
+      # ── Obtencion del .so: artifact del mismo run (si ffm_version vacio) ──
+      - name: Download .so from artifact (mismo run)
+        if: inputs.ffm_version == ''
+        uses: actions/download-artifact@v4
+        with:
+          name: rust-ffm-lib-${{ matrix.arch }}
+          path: dist
+
+      - name: Setup GraalVM JDK 25 (con native-image)
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          native-image-job-reports: 'true'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ matrix.runner }}-maven-ffm25-native-${{ hashFiles('sources/java/ether-sqlite-ffm-runtime/pom.xml', 'sources/java/ether-sqlite-core/pom.xml') }}
+          restore-keys: ${{ matrix.runner }}-maven-ffm25-native-
+
+      - name: Set pom.xml versions from tag
+        if: inputs.release_tag != ''
+        run: |
+          VERSION="${{ inputs.release_tag }}"
+          VERSION="${VERSION#v}"
+          ./mvnw versions:set -f sources/java/ether-sqlite-core/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+          ./mvnw versions:set -f sources/java/ether-sqlite-ffm-runtime/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+
+      - name: Build + install ether-sqlite-core
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+
+      - name: Build GraalVM Native Image (FFM Java 25)
+        working-directory: sources/java/ether-sqlite-ffm-runtime
+        env:
+          ETHER_SQLITE_LIB: ${{ github.workspace }}/dist/${{ matrix.lib }}
+        run: ./mvnw -Pnative package native:compile -DskipTests --no-transfer-progress
+
+      - name: Collect artifact
+        run: |
+          mkdir -p out
+          cp sources/java/ether-sqlite-ffm-runtime/target/ether-sqlite out/${{ matrix.binary }}
+          chmod +x out/${{ matrix.binary }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-img-ffm25-${{ matrix.arch }}
+          path: out/

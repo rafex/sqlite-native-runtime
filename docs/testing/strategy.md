@@ -127,7 +127,7 @@ A diferencia de TT-1, estos tests compilan en una unidad separada (`tests/`) y u
 los símbolos exportados como lo haría un linker externo.
 
 ### Herramienta
-`cargo test --test` — tests en `sqlite-native-runtime/rust/tests/`.
+`cargo test --test` — tests en `sources/rust/ether-sqlite/tests/`.
 Validan que `#[no_mangle]` funciona, que las firmas son correctas y que el contrato
 de ownership de memoria (caller-frees vs internal ptr) se cumple.
 

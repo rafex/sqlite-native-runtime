@@ -5,55 +5,52 @@
 #   push de tag : v{MAJOR}.{MINOR}.{PATCH}[-sufijo]  (ej. v0.1.0, v2.0.0-rc.1)
 #   workflow_dispatch : permite relanzar manualmente cualquier tag fallido
 #
-# Delega la compilacion a los dos pipelines reutilizables:
-#   build-java25-native.yml  →  Rust .so + Java 25 JARs + Native Images x86_64/arm64
-#   build-java21.yml         →  Java 21 preview JAR + JNI Java 22 JAR + JNI Native Images
+# Los paquetes Rust (.so) se publican de forma INDEPENDIENTE via build-rust.yml
+# (tags rust-ffm-v* / rust-jni-v* o workflow_dispatch).
+# Las versiones activas se leen de los archivos FFM_VERSION y JNI_VERSION en la raiz.
 #
-# Artefactos publicados en el GitHub Release (29 ficheros):
+# Pipelines Java invocados en paralelo tras determinar versiones:
+#   build-java-ffm.yml  →  Java 25 JAR + fat JAR + Native Image (FFM)
+#                          Java 21 preview JAR + fat JAR (FFM, solo JAR)
+#   build-java-jni.yml  →  Java 21 JAR + fat JAR + Native Image (JNI)
 #
-#   Rust native (.so):
-#     libether_sqlite_runtime-linux-amd64.so
-#     libether_sqlite_runtime-linux-amd64.so.sha256
-#     libether_sqlite_runtime-linux-arm64.so
-#     libether_sqlite_runtime-linux-arm64.so.sha256
+# Artefactos publicados en el GitHub Release:
 #
-#   Java 25 stable FFM (ether-sqlite-runtime):
-#     ether-sqlite-runtime-{version}.jar
-#     ether-sqlite-runtime-{version}.jar.sha256
-#     ether-sqlite-runtime-{version}-fat.jar
-#     ether-sqlite-runtime-{version}-fat.jar.sha256
+#   Rust native FFM (.so):
+#     libether_sqlite_ffm_runtime-linux-amd64.so  + .sha256
+#     libether_sqlite_ffm_runtime-linux-arm64.so  + .sha256
 #
-#   Java 21 preview FFM (ether-sqlite-java21-runtime, JAR only):
-#     ether-sqlite-java21-runtime-{version}.jar
-#     ether-sqlite-java21-runtime-{version}.jar.sha256
-#     ether-sqlite-java21-runtime-{version}-fat.jar
-#     ether-sqlite-java21-runtime-{version}-fat.jar.sha256
+#   Rust native JNI (.so):
+#     libether_sqlite_jni_runtime-linux-amd64.so  + .sha256
+#     libether_sqlite_jni_runtime-linux-arm64.so  + .sha256
 #
-#   JNI Java 22 stable FFM (ether-sqlite-jni-java21-runtime):
-#     ether-sqlite-jni-java21-runtime-{version}.jar
-#     ether-sqlite-jni-java21-runtime-{version}.jar.sha256
-#     ether-sqlite-jni-java21-runtime-{version}-fat.jar
-#     ether-sqlite-jni-java21-runtime-{version}-fat.jar.sha256
+#   Java 25 stable FFM (ether-sqlite-ffm-runtime):
+#     ether-sqlite-ffm-runtime-{version}.jar          + .sha256
+#     ether-sqlite-ffm-runtime-{version}-fat.jar      + .sha256
 #
-#   GraalVM Native Image Java 25:
-#     ether-sqlite-linux-amd64.bin
-#     ether-sqlite-linux-amd64.bin.sha256
-#     ether-sqlite-linux-arm64.bin
-#     ether-sqlite-linux-arm64.bin.sha256
+#   Java 21 preview FFM (ether-sqlite-ffm-java21-runtime, JAR only):
+#     ether-sqlite-ffm-java21-runtime-{version}.jar     + .sha256
+#     ether-sqlite-ffm-java21-runtime-{version}-fat.jar + .sha256
 #
-#   GraalVM Native Image JNI Java 22:
-#     ether-sqlite-jni-linux-amd64.bin
-#     ether-sqlite-jni-linux-amd64.bin.sha256
-#     ether-sqlite-jni-linux-arm64.bin
-#     ether-sqlite-jni-linux-arm64.bin.sha256
+#   JNI Java 21 (ether-sqlite-jni-runtime):
+#     ether-sqlite-jni-runtime-{version}.jar     + .sha256
+#     ether-sqlite-jni-runtime-{version}-fat.jar + .sha256
+#
+#   GraalVM Native Image FFM Java 25:
+#     ether-sqlite-ffm-linux-amd64.bin  + .sha256
+#     ether-sqlite-ffm-linux-arm64.bin  + .sha256
+#
+#   GraalVM Native Image JNI Java 21:
+#     ether-sqlite-jni-linux-amd64.bin  + .sha256
+#     ether-sqlite-jni-linux-arm64.bin  + .sha256
 #
 #   Script:
 #     install.sh
 #
 # Grafo de dependencias:
 #
-#   build-java25-native ──→ build-java21 ──┐
-#                       └─────────────────┴──→ release
+#   prepare ──→ build-java-ffm ──┐
+#           └──→ build-java-jni ─┴──→ release
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Release
@@ -69,36 +66,81 @@ on:
         description: 'Tag a publicar (ej. v0.1.0)'
         required: true
         type: string
+      ffm_version:
+        description: 'Version FFM Rust a usar (ej. 0.1.0). Vacio = leer de FFM_VERSION en el tag'
+        required: false
+        type: string
+        default: ''
+      jni_version:
+        description: 'Version JNI Rust a usar (ej. 0.1.0). Vacio = leer de JNI_VERSION en el tag'
+        required: false
+        type: string
+        default: ''
 
 # contents: write — crear GitHub Releases y subir assets
 # actions:  write — disparar verify-release.yml al terminar
+# packages: read  — descargar .so de GHCR
 permissions:
   contents: write
   actions: write
+  packages: read
 
 env:
   RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+  REGISTRY: ghcr.io
+  FFM_IMAGE: ${{ github.repository_owner }}/ether-sqlite-ffm
+  JNI_IMAGE: ${{ github.repository_owner }}/ether-sqlite-jni
 
 jobs:
 
-  # ── 1. Pipeline primario: Java 25 + Rust .so + Native Images ─────────────────
-  build-java25-native:
-    name: "Pipeline Java 25 + Native"
-    uses: ./.github/workflows/build-java25-native.yml
+  # ── 0. Determinar versiones ───────────────────────────────────────────────────
+  prepare:
+    name: "Preparar versiones"
+    runs-on: ubuntu-latest
+    outputs:
+      ffm_version: ${{ steps.versions.outputs.ffm_version }}
+      jni_version: ${{ steps.versions.outputs.jni_version }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Determinar ffm_version y jni_version
+        id: versions
+        run: |
+          FFM_V="${{ inputs.ffm_version }}"
+          JNI_V="${{ inputs.jni_version }}"
+          if [ -z "$FFM_V" ]; then
+            FFM_V="$(cat FFM_VERSION)"
+          fi
+          if [ -z "$JNI_V" ]; then
+            JNI_V="$(cat JNI_VERSION)"
+          fi
+          echo "ffm_version=${FFM_V}" >> $GITHUB_OUTPUT
+          echo "jni_version=${JNI_V}" >> $GITHUB_OUTPUT
+          echo "FFM version: ${FFM_V}"
+          echo "JNI version: ${JNI_V}"
+          echo "Release tag: ${{ env.RELEASE_TAG }}"
+
+  # ── 1. Pipeline FFM: Java 25 JARs + Native Images + Java 21 preview JAR ──────
+  build-java-ffm:
+    name: "Pipeline Java FFM"
+    needs: prepare
+    uses: ./.github/workflows/build-java-ffm.yml
     with:
       release_tag: ${{ inputs.tag || github.ref_name }}
+      ffm_version: ${{ needs.prepare.outputs.ffm_version }}
     secrets: inherit
 
-  # ── 2. Pipeline secundario: Java 21 preview JAR + JNI Native Images ──────────
-  # Espera a build-java25-native para reutilizar sus artefactos rust-lib-{arch}.
-  # build-java21/build-rust esta desactivado en workflow_call (if: workflow_dispatch),
-  # asi que build-native-jni descarga directamente los .so del pipeline anterior.
-  build-java21:
-    name: "Pipeline Java 21 + JNI"
-    needs: build-java25-native
-    uses: ./.github/workflows/build-java21.yml
+  # ── 2. Pipeline JNI: Java 21 JAR + Native Images ─────────────────────────────
+  build-java-jni:
+    name: "Pipeline Java JNI"
+    needs: prepare
+    uses: ./.github/workflows/build-java-jni.yml
     with:
       release_tag: ${{ inputs.tag || github.ref_name }}
+      jni_version: ${{ needs.prepare.outputs.jni_version }}
     secrets: inherit
 
   # ── 3. Calcular SHA256 y crear el GitHub Release ──────────────────────────────
@@ -106,19 +148,46 @@ jobs:
     name: "GitHub Release ${{ inputs.tag || github.ref_name }}"
     runs-on: ubuntu-latest
     needs:
-      - build-java25-native
-      - build-java21
+      - prepare
+      - build-java-ffm
+      - build-java-jni
 
     steps:
       - uses: actions/checkout@v4
         with:
           ref: ${{ env.RELEASE_TAG }}
 
-      - name: Download all artifacts
+      - name: Download all build artifacts (JARs + native images)
         uses: actions/download-artifact@v4
         with:
           merge-multiple: true
           path: artifacts
+
+      - name: Setup ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Download FFM .so from GHCR (amd64)
+        run: |
+          cd artifacts
+          oras pull "${{ env.REGISTRY }}/${{ env.FFM_IMAGE }}:${{ needs.prepare.outputs.ffm_version }}-amd64"
+
+      - name: Download FFM .so from GHCR (arm64)
+        run: |
+          cd artifacts
+          oras pull "${{ env.REGISTRY }}/${{ env.FFM_IMAGE }}:${{ needs.prepare.outputs.ffm_version }}-arm64"
+
+      - name: Download JNI .so from GHCR (amd64)
+        run: |
+          cd artifacts
+          oras pull "${{ env.REGISTRY }}/${{ env.JNI_IMAGE }}:${{ needs.prepare.outputs.jni_version }}-amd64"
+
+      - name: Download JNI .so from GHCR (arm64)
+        run: |
+          cd artifacts
+          oras pull "${{ env.REGISTRY }}/${{ env.JNI_IMAGE }}:${{ needs.prepare.outputs.jni_version }}-arm64"
 
       - name: List artifacts
         run: ls -lh artifacts/
@@ -137,8 +206,8 @@ jobs:
         run: |
           NOTES_FILE="$(mktemp --suffix=.md)"
           tail -n +2 RELEASE.md > "${NOTES_FILE}"
-          gh release create "${RELEASE_TAG}" \
-            --title "Release ${RELEASE_TAG}" \
+          gh release create "${{ env.RELEASE_TAG }}" \
+            --title "Release ${{ env.RELEASE_TAG }}" \
             --notes-file "${NOTES_FILE}" \
             artifacts/* \
             scripts/release/install.sh
@@ -150,4 +219,4 @@ jobs:
           gh workflow run verify-release.yml \
             --repo "${{ github.repository }}" \
             --ref main \
-            --field release_tag="${RELEASE_TAG}"
+            --field release_tag="${{ env.RELEASE_TAG }}"

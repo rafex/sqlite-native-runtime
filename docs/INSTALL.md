@@ -153,18 +153,18 @@ Los binarios pre-compilados en los releases son solo para Linux. En macOS compil
 git clone https://github.com/rafex/sqlite-native-runtime.git
 cd sqlite-native-runtime
 make build-rust
-# Librería: sqlite-native-runtime/rust/target/release/libsqlite_native_runtime.dylib
+# Librería: sources/rust/ether-sqlite/target/release/libether_sqlite_runtime.dylib
 ```
 
 Instala con:
 ```sh
-sudo cp sqlite-native-runtime/rust/target/release/libsqlite_native_runtime.dylib \
+sudo cp sources/rust/ether-sqlite/target/release/libether_sqlite_runtime.dylib \
         /usr/local/lib/
 ```
 
 O con Homebrew prefix:
 ```sh
-cp sqlite-native-runtime/rust/target/release/libsqlite_native_runtime.dylib \
+cp sources/rust/ether-sqlite/target/release/libether_sqlite_runtime.dylib \
    /opt/homebrew/lib/
 ```
 
@@ -175,11 +175,11 @@ cp sqlite-native-runtime/rust/target/release/libsqlite_native_runtime.dylib \
 ### Instalar el JAR en el repositorio local
 
 ```sh
-# Descarga sqlite-native-runtime-{version}.jar del release y:
+# Descarga ether-sqlite-runtime-{version}.jar del release y:
 mvn install:install-file \
-  -Dfile=sqlite-native-runtime-0.1.1.jar \
+  -Dfile=ether-sqlite-runtime-0.1.1.jar \
   -DgroupId=mx.rafex \
-  -DartifactId=sqlite-native-runtime \
+  -DartifactId=ether-sqlite-runtime \
   -Dversion=0.1.1 \
   -Dpackaging=jar
 ```
@@ -189,7 +189,7 @@ mvn install:install-file \
 ```xml
 <dependency>
   <groupId>mx.rafex</groupId>
-  <artifactId>sqlite-native-runtime</artifactId>
+  <artifactId>ether-sqlite-runtime</artifactId>
   <version>0.1.1</version>
 </dependency>
 ```
@@ -198,7 +198,7 @@ mvn install:install-file \
 
 ```kotlin
 dependencies {
-    implementation("mx.rafex:sqlite-native-runtime:0.1.1")
+    implementation("mx.rafex.ether:ether-sqlite-runtime:0.1.1")
 }
 ```
 

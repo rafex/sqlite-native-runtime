@@ -1,0 +1,14 @@
+[package]
+name        = "ether-sqlite-core"
+version     = "0.1.0"
+edition     = "2021"
+description = "SQLite core logic — ABI C pura reutilizable por FFM y JNI"
+
+[lib]
+name       = "ether_sqlite_core"
+crate-type = ["rlib"]
+
+[dependencies]
+libsqlite3-sys = { version = "0.30", features = ["bundled"] }
+
+# Profiles are defined in the workspace root Cargo.toml

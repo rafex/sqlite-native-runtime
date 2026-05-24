@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Ejecuta tests + verifica cobertura JaCoCo (LINE >= 0.99).
-# Reporte HTML: sqlite-native-runtime/java/ether-sqlite/target/site/jacoco/index.html
+# Reporte HTML: sources/java/ether-sqlite-ffm-runtime/target/site/jacoco/index.html
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/../commons/env.sh"
 

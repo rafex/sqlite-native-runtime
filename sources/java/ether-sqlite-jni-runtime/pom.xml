@@ -1,0 +1,222 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0
+                             https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <groupId>mx.rafex.ether</groupId>
+  <artifactId>ether-sqlite-jni-runtime</artifactId>
+  <version>0.1.0</version>
+  <packaging>jar</packaging>
+
+  <name>ether-sqlite-jni-runtime</name>
+  <description>Binding JNI para libether_sqlite_jni_runtime — Java 21+ (sin --enable-preview). GraalVM native-image viable.</description>
+
+  <properties>
+    <!--
+      Java 21 LTS: JNI clasico, sin Panama FFM ni flag enable-preview.
+      Bytecode class file version 65.0, cargable por cualquier JVM 21+.
+      GraalVM 25 puede hacer native-image con JNI sin restricciones.
+      Esta es la opcion recomendada para usuarios Java 21 que necesiten native-image.
+    -->
+    <maven.compiler.release>21</maven.compiler.release>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+
+    <!-- GraalVM Build Tools - native-maven-plugin -->
+    <native.maven.plugin.version>0.10.6</native.maven.plugin.version>
+  </properties>
+
+  <dependencies>
+    <dependency>
+      <groupId>mx.rafex.ether</groupId>
+      <artifactId>ether-sqlite-core</artifactId>
+      <version>0.1.0</version>
+    </dependency>
+    <dependency>
+      <groupId>org.junit.jupiter</groupId>
+      <artifactId>junit-jupiter</artifactId>
+      <version>5.11.4</version>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <plugins>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-compiler-plugin</artifactId>
+        <version>3.13.0</version>
+        <configuration>
+          <!-- Java 21: JNI clasico, sin flag enable-preview ni Panama FFM -->
+          <release>21</release>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-surefire-plugin</artifactId>
+        <version>3.5.2</version>
+        <configuration>
+          <!--
+            JNI no requiere flag enable-native-access (solo la necesita Panama FFM).
+            JaCoCo inyecta su agente via @{argLine}.
+            Los tests de integracion (@Tag("integration")) se excluyen por defecto.
+          -->
+          <argLine>@{argLine}</argLine>
+          <excludedGroups>integration</excludedGroups>
+        </configuration>
+      </plugin>
+
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>0.8.13</version>
+        <executions>
+          <execution>
+            <id>jacoco-prepare-agent</id>
+            <goals><goal>prepare-agent</goal></goals>
+          </execution>
+          <execution>
+            <id>jacoco-report</id>
+            <phase>test</phase>
+            <goals><goal>report</goal></goals>
+          </execution>
+          <execution>
+            <id>jacoco-check</id>
+            <phase>verify</phase>
+            <goals><goal>check</goal></goals>
+            <configuration>
+              <rules>
+                <rule>
+                  <element>BUNDLE</element>
+                  <limits>
+                    <limit>
+                      <counter>LINE</counter>
+                      <value>COVEREDRATIO</value>
+                      <!--
+                        0.99: SqliteLibraryJni.loadLibrary() tiene ramas de fallback
+                        no testeables sin manipulación de filesystem o env.
+                      -->
+                      <minimum>0.99</minimum>
+                    </limit>
+                  </limits>
+                </rule>
+              </rules>
+              <!--
+                SqliteLibraryJni se excluye: su bloque static loadLibrary() tiene ramas
+                de fallback no testeables sin manipulación de filesystem o env.
+              -->
+              <excludes>
+                <exclude>mx/rafex/ether/sqlite/jni/SqliteLibraryJni.class</exclude>
+              </excludes>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-jar-plugin</artifactId>
+        <version>3.4.2</version>
+        <configuration>
+          <archive>
+            <manifest>
+              <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
+            </manifest>
+          </archive>
+        </configuration>
+      </plugin>
+
+      <!--
+        Fat JAR:
+          ether-sqlite-jni-runtime-{version}.jar      <- thin JAR
+          ether-sqlite-jni-runtime-{version}-fat.jar  <- fat JAR
+      -->
+      <plugin>
+        <groupId>org.apache.maven.plugins</groupId>
+        <artifactId>maven-shade-plugin</artifactId>
+        <version>3.6.0</version>
+        <executions>
+          <execution>
+            <phase>package</phase>
+            <goals><goal>shade</goal></goals>
+            <configuration>
+              <shadedArtifactAttached>true</shadedArtifactAttached>
+              <shadedClassifierName>fat</shadedClassifierName>
+              <createDependencyReducedPom>false</createDependencyReducedPom>
+              <filters>
+                <filter>
+                  <artifact>*:*</artifact>
+                  <excludes>
+                    <exclude>META-INF/*.SF</exclude>
+                    <exclude>META-INF/*.DSA</exclude>
+                    <exclude>META-INF/*.RSA</exclude>
+                  </excludes>
+                </filter>
+              </filters>
+            </configuration>
+          </execution>
+        </executions>
+      </plugin>
+
+    </plugins>
+  </build>
+
+  <profiles>
+
+    <!--
+      Perfil integration: activa los tests @Tag("integration").
+      Uso: mvn test -Pintegration
+    -->
+    <profile>
+      <id>integration</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.apache.maven.plugins</groupId>
+            <artifactId>maven-surefire-plugin</artifactId>
+            <version>3.5.2</version>
+            <configuration combine.self="override">
+              <groups>integration</groups>
+              <argLine>@{argLine}</argLine>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+    <!--
+      Perfil native: compila SmokeTest como GraalVM Native Image via JNI.
+      JNI es plenamente compatible con native-image, sin restricciones de preview
+      ni native-access.
+      Uso: mvn -Pnative package native:compile
+      Binario: target/ether-sqlite-jni
+    -->
+    <profile>
+      <id>native</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.graalvm.buildtools</groupId>
+            <artifactId>native-maven-plugin</artifactId>
+            <version>${native.maven.plugin.version}</version>
+            <extensions>true</extensions>
+            <configuration>
+              <imageName>ether-sqlite-jni</imageName>
+              <mainClass>mx.rafex.ether.sqlite.SmokeTest</mainClass>
+              <buildArgs>
+                <buildArg>--initialize-at-run-time=mx.rafex.ether.sqlite.jni.SqliteLibraryJni</buildArg>
+                <buildArg>-cp</buildArg>
+                <buildArg>${project.build.outputDirectory}:${project.build.testOutputDirectory}</buildArg>
+              </buildArgs>
+            </configuration>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+
+  </profiles>
+
+</project>
