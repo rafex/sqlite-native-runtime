@@ -372,12 +372,15 @@ jobs:
           ETHER_SQLITE_LIB: ${{ github.workspace }}/dist/${{ matrix.lib }}
         run: |
           VERSION="${RELEASE_TAG#v}"
+          # --enable-preview NO se pasa a native-image: GraalVM 25 lo interpreta
+          # como "preview Java 25", incompatible con bytecode preview Java 21
+          # (minor_version=0xFFFF). El AOT lee el bytecode sin ejecutarlo en la JVM,
+          # por lo que la restriccion preview no aplica en la fase de compilacion AOT.
           native-image \
             --no-fallback \
             -o target/ether-sqlite-java21 \
             --initialize-at-run-time=mx.rafex.ether.sqlite.SqliteLibrary \
             --enable-native-access=ALL-UNNAMED \
-            --enable-preview \
             -cp "target/ether-sqlite-java21-runtime-${VERSION}.jar:target/classes:target/test-classes" \
             mx.rafex.ether.sqlite.SmokeTest
 

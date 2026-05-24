@@ -1,22 +1,22 @@
 {
   "foreign": {
     "downcalls": [
-      { "returnType": "ADDRESS", "parameterTypes": [] },
-      { "parameterTypes": ["ADDRESS"] },
-      { "returnType": "ADDRESS", "parameterTypes": ["ADDRESS"] },
-      { "returnType": "ADDRESS", "parameterTypes": ["ADDRESS", "JAVA_INT"] },
-      { "returnType": "ADDRESS", "parameterTypes": ["ADDRESS", "ADDRESS"] },
-      { "returnType": "JAVA_LONG", "parameterTypes": ["ADDRESS"] },
-      { "returnType": "JAVA_LONG", "parameterTypes": ["ADDRESS", "JAVA_INT"] },
-      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS"] },
-      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "ADDRESS"] },
-      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "JAVA_INT"] },
-      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "JAVA_INT", "JAVA_LONG"] },
-      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "JAVA_INT", "JAVA_DOUBLE"] },
-      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "JAVA_INT", "ADDRESS"] },
-      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "JAVA_INT", "ADDRESS", "JAVA_INT"] },
-      { "returnType": "JAVA_INT",  "parameterTypes": ["ADDRESS", "ADDRESS", "JAVA_INT", "ADDRESS", "ADDRESS"] },
-      { "returnType": "JAVA_DOUBLE", "parameterTypes": ["ADDRESS", "JAVA_INT"] }
+      { "returnType": "void*",    "parameterTypes": [] },
+      { "returnType": "void",     "parameterTypes": ["void*"] },
+      { "returnType": "void*",    "parameterTypes": ["void*"] },
+      { "returnType": "void*",    "parameterTypes": ["void*", "int"] },
+      { "returnType": "void*",    "parameterTypes": ["void*", "void*"] },
+      { "returnType": "long long","parameterTypes": ["void*"] },
+      { "returnType": "long long","parameterTypes": ["void*", "int"] },
+      { "returnType": "int",      "parameterTypes": ["void*"] },
+      { "returnType": "int",      "parameterTypes": ["void*", "void*"] },
+      { "returnType": "int",      "parameterTypes": ["void*", "int"] },
+      { "returnType": "int",      "parameterTypes": ["void*", "int", "long long"] },
+      { "returnType": "int",      "parameterTypes": ["void*", "int", "double"] },
+      { "returnType": "int",      "parameterTypes": ["void*", "int", "void*"] },
+      { "returnType": "int",      "parameterTypes": ["void*", "int", "void*", "int"] },
+      { "returnType": "int",      "parameterTypes": ["void*", "void*", "int", "void*", "void*"] },
+      { "returnType": "double",   "parameterTypes": ["void*", "int"] }
     ],
     "upcalls": []
   }
