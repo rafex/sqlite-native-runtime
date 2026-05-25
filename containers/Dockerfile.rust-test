@@ -49,6 +49,12 @@ COPY sources/rust/ether-sqlite-core/Cargo.toml ./ether-sqlite-core/Cargo.toml
 COPY sources/rust/ether-sqlite-ffm/Cargo.toml  ./ether-sqlite-ffm/Cargo.toml
 COPY sources/rust/ether-sqlite-jni/Cargo.toml  ./ether-sqlite-jni/Cargo.toml
 
+# cargo fetch valida que src/lib.rs exista para cada miembro del workspace
+# aunque solo descarga dependencias. Se crean placeholders antes del fetch
+# y se sobreescriben con el código real después.
+RUN mkdir -p ether-sqlite-core/src ether-sqlite-ffm/src ether-sqlite-jni/src \
+ && touch ether-sqlite-core/src/lib.rs ether-sqlite-ffm/src/lib.rs ether-sqlite-jni/src/lib.rs
+
 RUN cargo fetch
 
 # ── Código fuente real ─────────────────────────────────────────────────────
