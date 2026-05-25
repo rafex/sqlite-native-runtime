@@ -6,8 +6,11 @@
 #   • pull_request (validar antes de integrar)
 #
 # Jobs (paralelos):
-#   test-rust  → TT-1 (unit) + TT-2 (FFI contract)  dentro de un contenedor Debian 12
-#   test-java  → TT-3 (unit) + TT-3i (integration)  dentro de un contenedor multi-stage
+#   test-rust  → TT-1 (unit) + TT-2 (FFI contract)   Debian 12 (ether-sqlite-core Rust)
+#   test-java  → TT-3 (unit) + TT-3i (integration)   multi-stage:
+#                  java25-tester     (FFM estable, Java 25)
+#                  java21ffm-tester  (FFM preview, Java 21)
+#                  java21jni-tester  (JNI real, Java 21)
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: CI
@@ -59,7 +62,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('sources/rust/ether-sqlite/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('sources/rust/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build image and run Rust tests

@@ -2,17 +2,29 @@
 # TT-3 + TT-3i — Java unit tests + integration tests
 #
 # Build multi-stage:
-#   1. rust-builder   → compila libether_sqlite_runtime.so (Linux amd64/arm64)
-#   2. java25-tester  → mvn test (Java 25, Panama FFM estable, JEP 454)
-#   3. java21-tester  → mvn test (Java 21, Panama FFM preview, JEP 442)
+#   1. rust-builder        → libether_sqlite_ffm_runtime.so + libether_sqlite_jni_runtime.so
+#   2. java25-tester       → mvn test ether-sqlite-ffm-runtime   (Java 25, Panama FFM estable)
+#   3. java21ffm-tester    → mvn test ether-sqlite-ffm-java21-runtime (Java 21, FFM preview)
+#   4. java21jni-tester    → mvn test ether-sqlite-jni-runtime   (Java 21, JNI real)
+#   5. java-tester (final) → agrega reportes surefire de las 3 etapas
 #
 # Uso local  : make container-test-java           (Podman)
 # CI         : make container-test-java CONTAINER_ENGINE=docker
 # Manual     : podman build -f containers/Dockerfile.java-test -t snr-java-test .
 #              podman run --rm snr-java-test
+#
+# Base ctx   : raiz del repositorio ($ROOT)
+# Módulos Rust (sources/rust/):
+#   ether-sqlite-ffm  → libether_sqlite_ffm_runtime.so  (Panama FFM)
+#   ether-sqlite-jni  → libether_sqlite_jni_runtime.so  (JNI)
+# Módulos Java (sources/java/):
+#   ether-sqlite-core              ← interfaces puras, Java 21 (sin mvnw propio)
+#   ether-sqlite-ffm-runtime       ← Java 25 stable FFM
+#   ether-sqlite-ffm-java21-runtime ← Java 21 preview FFM (JAR only)
+#   ether-sqlite-jni-runtime       ← Java 21 JNI real
 # ─────────────────────────────────────────────────────────────────────────────
 
-# ── Etapa 1: Compilar la librería nativa Rust ─────────────────────────────────
+# ── Etapa 1: Compilar las librerías nativas Rust ──────────────────────────────
 
 FROM debian:12-slim AS rust-builder
 
@@ -26,93 +38,155 @@ RUN apt-get update \
  && rm -rf /var/lib/apt/lists/*
 
 RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
-    | sh -s -- -y --profile minimal --default-toolchain ${RUST_VERSION}
+    | sh -s -- -y --profile minimal --default-toolchain ${RUST_VERSION} \
+ && /root/.cargo/bin/rustup show
 
 ENV PATH="/root/.cargo/bin:${PATH}"
 
-WORKDIR /app/rust
+WORKDIR /app
 
-# Caching de dependencias: manifiestos antes que código fuente
-COPY sqlite-native-runtime/rust/ether-sqlite/Cargo.toml ./Cargo.toml
-COPY sqlite-native-runtime/rust/ether-sqlite/Cargo.lock* ./
+# ── Caching de dependencias con cargo fetch ────────────────────────────────
+# cargo fetch descarga dependencias usando solo manifiestos, sin código fuente.
+# Si solo cambia src/ pero no los Cargo.toml, esta capa se reutiliza.
+COPY sources/rust/Cargo.toml             ./Cargo.toml
+COPY sources/rust/Cargo.lock             ./Cargo.lock
+COPY sources/rust/ether-sqlite-core/Cargo.toml ./ether-sqlite-core/Cargo.toml
+COPY sources/rust/ether-sqlite-ffm/Cargo.toml  ./ether-sqlite-ffm/Cargo.toml
+COPY sources/rust/ether-sqlite-jni/Cargo.toml  ./ether-sqlite-jni/Cargo.toml
 
-RUN mkdir -p src \
- && printf 'pub fn _placeholder() {}' > src/lib.rs \
- && cargo build --release 2>&1 | tail -5 \
- && rm -rf src target
+RUN cargo fetch
 
-COPY sqlite-native-runtime/rust/ether-sqlite/src ./src
-COPY sqlite-native-runtime/rust/ether-sqlite/tests ./tests
+# ── Código fuente real ─────────────────────────────────────────────────────
+COPY sources/rust/ether-sqlite-core/src  ./ether-sqlite-core/src
+COPY sources/rust/ether-sqlite-ffm/src   ./ether-sqlite-ffm/src
+COPY sources/rust/ether-sqlite-jni/src   ./ether-sqlite-jni/src
 
-# Compilar la .so release (el artifact que usa Java)
-RUN cargo build --release \
- && ls -lh target/release/libether_sqlite_runtime.so
+# Compilar ambas shared libraries (FFM + JNI)
+RUN cargo build -p ether-sqlite-ffm -p ether-sqlite-jni --release \
+ && ls -lh target/release/libether_sqlite_ffm_runtime.so \
+ && ls -lh target/release/libether_sqlite_jni_runtime.so
 
-# ── Etapa 2: Tests Java 25 (Panama FFM estable, sin --enable-preview) ─────────
+# ── Etapa 2: Tests Java 25 — Panama FFM estable (JEP 454) ────────────────────
 #
 # ghcr.io/graalvm/jdk-community:25 incluye JDK 25 completo.
-# eclipse-temurin no publica imagen :25 aún; GraalVM Community es el JDK 25
-# más estable disponible como imagen Docker.
+# Panama FFM estable no requiere --enable-preview.
 
 FROM ghcr.io/graalvm/jdk-community:25 AS java25-tester
 
-WORKDIR /app/java25
+WORKDIR /app/java
 
-# Caching de dependencias Maven: manifiestos antes que código
-COPY sqlite-native-runtime/java/ether-sqlite/.mvn   ./.mvn
-COPY sqlite-native-runtime/java/ether-sqlite/mvnw   ./
-COPY sqlite-native-runtime/java/ether-sqlite/pom.xml ./
-RUN chmod +x mvnw \
- && ./mvnw dependency:go-offline --no-transfer-progress -q
+# Maven wrapper del módulo (ether-sqlite-core no tiene mvnw propio)
+COPY sources/java/ether-sqlite-ffm-runtime/.mvn  ./ether-sqlite-ffm-runtime/.mvn
+COPY sources/java/ether-sqlite-ffm-runtime/mvnw  ./ether-sqlite-ffm-runtime/mvnw
+RUN chmod +x /app/java/ether-sqlite-ffm-runtime/mvnw
 
-COPY sqlite-native-runtime/java/ether-sqlite/src ./src
+# Manifiestos y código fuente
+COPY sources/java/ether-sqlite-core/pom.xml          ./ether-sqlite-core/pom.xml
+COPY sources/java/ether-sqlite-core/src               ./ether-sqlite-core/src
+COPY sources/java/ether-sqlite-ffm-runtime/pom.xml   ./ether-sqlite-ffm-runtime/pom.xml
+COPY sources/java/ether-sqlite-ffm-runtime/src        ./ether-sqlite-ffm-runtime/src
 
+# Librería nativa FFM
 COPY --from=rust-builder \
-     /app/rust/target/release/libether_sqlite_runtime.so \
-     /usr/local/lib/libether_sqlite_runtime.so
+     /app/target/release/libether_sqlite_ffm_runtime.so \
+     /usr/local/lib/libether_sqlite_ffm_runtime.so
 
-ENV ETHER_SQLITE_LIB=/usr/local/lib/libether_sqlite_runtime.so
+ENV ETHER_SQLITE_LIB=/usr/local/lib/libether_sqlite_ffm_runtime.so
 
-# TT-3 : unit tests
-# TT-3i: integration tests @Tag("integration")
-# JaCoCo se omite aquí: el Docker CI verifica que los tests pasan,
-# no genera reportes de cobertura (se ejecutan en CI dedicado con mvn verify).
-RUN ./mvnw test -Djacoco.skip=true --no-transfer-progress \
+# Instalar core en .m2 local, luego ejecutar tests FFM Java 25
+# TT-3 : unit tests (excluye @Tag("integration") por defecto)
+# TT-3i: integration tests @Tag("integration") via perfil -Pintegration
+RUN cd /app/java/ether-sqlite-ffm-runtime \
+ && ./mvnw install -f /app/java/ether-sqlite-core/pom.xml \
+      -DskipTests --no-transfer-progress -q \
+ && ./mvnw test -Djacoco.skip=true --no-transfer-progress \
  && ./mvnw test -Pintegration -Djacoco.skip=true --no-transfer-progress
 
-# ── Etapa 3: Tests Java 21 (Panama FFM preview, --enable-preview) ─────────────
+# ── Etapa 3: Tests Java 21 — Panama FFM preview (JEP 442, enable-preview) ────
 #
 # El bytecode Java 21 preview (minor_version=0xFFFF) SOLO puede ejecutarse
-# en una JVM Java 21 con --enable-preview. Se usa eclipse-temurin:21-jdk.
+# en una JVM Java 21 con --enable-preview. JDK 25 rechaza bytecode preview
+# compilado con --release 21. Se usa eclipse-temurin:21-jdk-noble.
 
-FROM eclipse-temurin:21-jdk-noble AS java21-tester
+FROM eclipse-temurin:21-jdk-noble AS java21ffm-tester
 
-WORKDIR /app/java21
+WORKDIR /app/java
 
-# Caching de dependencias Maven: manifiestos antes que código
-COPY sqlite-native-runtime/java/ether-sqlite-java21/.mvn   ./.mvn
-COPY sqlite-native-runtime/java/ether-sqlite-java21/mvnw   ./
-COPY sqlite-native-runtime/java/ether-sqlite-java21/pom.xml ./
-RUN chmod +x mvnw \
- && ./mvnw dependency:go-offline --no-transfer-progress -q
+# Maven wrapper del módulo
+COPY sources/java/ether-sqlite-ffm-java21-runtime/.mvn  ./ether-sqlite-ffm-java21-runtime/.mvn
+COPY sources/java/ether-sqlite-ffm-java21-runtime/mvnw  ./ether-sqlite-ffm-java21-runtime/mvnw
+RUN chmod +x /app/java/ether-sqlite-ffm-java21-runtime/mvnw
 
-COPY sqlite-native-runtime/java/ether-sqlite-java21/src ./src
+# Manifiestos y código fuente
+COPY sources/java/ether-sqlite-core/pom.xml                    ./ether-sqlite-core/pom.xml
+COPY sources/java/ether-sqlite-core/src                         ./ether-sqlite-core/src
+COPY sources/java/ether-sqlite-ffm-java21-runtime/pom.xml      ./ether-sqlite-ffm-java21-runtime/pom.xml
+COPY sources/java/ether-sqlite-ffm-java21-runtime/src          ./ether-sqlite-ffm-java21-runtime/src
 
+# Librería nativa FFM (misma .so, cargada via Panama FFM)
 COPY --from=rust-builder \
-     /app/rust/target/release/libether_sqlite_runtime.so \
-     /usr/local/lib/libether_sqlite_runtime.so
+     /app/target/release/libether_sqlite_ffm_runtime.so \
+     /usr/local/lib/libether_sqlite_ffm_runtime.so
 
-ENV ETHER_SQLITE_LIB=/usr/local/lib/libether_sqlite_runtime.so
+ENV ETHER_SQLITE_LIB=/usr/local/lib/libether_sqlite_ffm_runtime.so
 
-# enable-preview ya configurado en pom.xml de ether-sqlite-java21
-RUN ./mvnw test -Djacoco.skip=true --no-transfer-progress \
+# --enable-preview ya está configurado en el pom.xml de ether-sqlite-ffm-java21-runtime
+# (maven-compiler-plugin + maven-surefire-plugin argLine)
+RUN cd /app/java/ether-sqlite-ffm-java21-runtime \
+ && ./mvnw install -f /app/java/ether-sqlite-core/pom.xml \
+      -DskipTests --no-transfer-progress -q \
+ && ./mvnw test -Djacoco.skip=true --no-transfer-progress \
  && ./mvnw test -Pintegration -Djacoco.skip=true --no-transfer-progress
 
-# ── Etapa final: arrastra ambas etapas de test ────────────────────────────────
+# ── Etapa 4: Tests Java 21 — JNI real ────────────────────────────────────────
+#
+# JNI clasico: Java_* ABI en Rust, native methods en Java.
+# Sin --enable-preview, bytecode class file 65.0.
+# Compatible con GraalVM native-image (la única opción viable para Java 21 + native).
+
+FROM eclipse-temurin:21-jdk-noble AS java21jni-tester
+
+WORKDIR /app/java
+
+# Maven wrapper del módulo
+COPY sources/java/ether-sqlite-jni-runtime/.mvn  ./ether-sqlite-jni-runtime/.mvn
+COPY sources/java/ether-sqlite-jni-runtime/mvnw  ./ether-sqlite-jni-runtime/mvnw
+RUN chmod +x /app/java/ether-sqlite-jni-runtime/mvnw
+
+# Manifiestos y código fuente
+COPY sources/java/ether-sqlite-core/pom.xml           ./ether-sqlite-core/pom.xml
+COPY sources/java/ether-sqlite-core/src                ./ether-sqlite-core/src
+COPY sources/java/ether-sqlite-jni-runtime/pom.xml    ./ether-sqlite-jni-runtime/pom.xml
+COPY sources/java/ether-sqlite-jni-runtime/src         ./ether-sqlite-jni-runtime/src
+
+# Librería nativa JNI
+COPY --from=rust-builder \
+     /app/target/release/libether_sqlite_jni_runtime.so \
+     /usr/local/lib/libether_sqlite_jni_runtime.so
+
+ENV ETHER_SQLITE_JNI_LIB=/usr/local/lib/libether_sqlite_jni_runtime.so
+
+# JNI no requiere --enable-native-access ni --enable-preview
+RUN cd /app/java/ether-sqlite-jni-runtime \
+ && ./mvnw install -f /app/java/ether-sqlite-core/pom.xml \
+      -DskipTests --no-transfer-progress -q \
+ && ./mvnw test -Djacoco.skip=true --no-transfer-progress \
+ && ./mvnw test -Pintegration -Djacoco.skip=true --no-transfer-progress
+
+# ── Etapa final: arrastra las tres etapas de test ─────────────────────────────
 
 FROM debian:12-slim AS java-tester
 
-COPY --from=java25-tester /app/java25/target/surefire-reports/ /reports/java25/
-COPY --from=java21-tester /app/java21/target/surefire-reports/ /reports/java21/
+COPY --from=java25-tester \
+     /app/java/ether-sqlite-ffm-runtime/target/surefire-reports/ \
+     /reports/java25-ffm/
 
-CMD ["echo", "Java 25 + Java 21 tests OK"]
+COPY --from=java21ffm-tester \
+     /app/java/ether-sqlite-ffm-java21-runtime/target/surefire-reports/ \
+     /reports/java21-ffm/
+
+COPY --from=java21jni-tester \
+     /app/java/ether-sqlite-jni-runtime/target/surefire-reports/ \
+     /reports/java21-jni/
+
+CMD ["echo", "Java 25 FFM + Java 21 FFM preview + Java 21 JNI tests OK"]
