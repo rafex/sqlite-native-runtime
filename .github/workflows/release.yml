@@ -10,9 +10,14 @@
 # Las versiones activas se leen de los archivos FFM_VERSION y JNI_VERSION en la raiz.
 #
 # Pipelines Java invocados en paralelo tras determinar versiones:
-#   build-java-ffm.yml  →  Java 25 JAR + fat JAR + Native Image (FFM)
-#                          Java 21 preview JAR + fat JAR (FFM, solo JAR)
-#   build-java-jni.yml  →  Java 21 JAR + fat JAR + Native Image (JNI)
+#   build-java-ffm.yml  →  Java 25 JAR + Native Image (FFM) + Java 21 preview JAR (FFM)
+#   build-java-jni.yml  →  Java 21 JAR + Native Image (JNI)
+#
+# Cuatro proyectos Java (minimo Java 21):
+#   ether-sqlite-core              — interfaces puras, Java 21 LTS
+#   ether-sqlite-ffm-runtime       — Panama FFM estable (JEP 454), Java 25, GraalVM native-image
+#   ether-sqlite-ffm-java21-runtime — Panama FFM preview (JEP 442), Java 21, JAR only
+#   ether-sqlite-jni-runtime       — JNI real, Java 21, GraalVM native-image
 #
 # Artefactos publicados en el GitHub Release:
 #
@@ -33,8 +38,8 @@
 #     ether-sqlite-ffm-java21-runtime-{version}-fat.jar + .sha256
 #
 #   JNI Java 21 (ether-sqlite-jni-runtime):
-#     ether-sqlite-jni-runtime-{version}.jar     + .sha256
-#     ether-sqlite-jni-runtime-{version}-fat.jar + .sha256
+#     ether-sqlite-jni-runtime-{version}.jar      + .sha256
+#     ether-sqlite-jni-runtime-{version}-fat.jar  + .sha256
 #
 #   GraalVM Native Image FFM Java 25:
 #     ether-sqlite-ffm-linux-amd64.bin  + .sha256

@@ -591,7 +591,8 @@ class SqliteConnectionTest {
 
     @Test
     void rawHandle_returnsNonNull() {
-        try (var db = FfmJava21SqliteConnection.memory()) {
+        try (var conn = FfmJava21SqliteConnection.memory();
+             var db   = (FfmJava21SqliteConnection) conn) {
             var h = db.rawHandle();
             assertNotNull(h);
             assertFalse(h.equals(java.lang.foreign.MemorySegment.NULL));
@@ -600,9 +601,9 @@ class SqliteConnectionTest {
 
     @Test
     void rawHandle_afterClose_throws() {
-        var db = FfmJava21SqliteConnection.memory();
-        db.close();
-        assertThrows(SqliteException.class, db::rawHandle);
+        var conn = (FfmJava21SqliteConnection) FfmJava21SqliteConnection.memory();
+        conn.close();
+        assertThrows(SqliteException.class, conn::rawHandle);
     }
 
     // ── close e idempotencia ───────────────────────────────────────────────────
@@ -639,6 +640,6 @@ class SqliteConnectionTest {
         }
         // lastError estático debería devolver algo (o null si fue limpiado)
         // La prueba principal es que no lanza excepción
-        assertDoesNotThrow(SqliteConnection::lastError);
+        assertDoesNotThrow(FfmJava21SqliteConnection::lastError);
     }
 }

@@ -185,7 +185,7 @@ public final class SqliteLibrary {
      */
     public static MemorySegment snr_open(String path, int flags) {
         try (var arena = Arena.ofConfined()) {
-            return (MemorySegment) MH_OPEN.invokeExact(arena.allocateUtf8String(path), flags);
+            return (MemorySegment) MH_OPEN.invokeExact(arena.allocateFrom(path), flags);
         } catch (Throwable t) { throw new SqliteException("snr_open falló", t); }
     }
 
@@ -197,7 +197,7 @@ public final class SqliteLibrary {
      */
     public static MemorySegment snr_open_memory(String name) {
         try (var arena = Arena.ofConfined()) {
-            var ptr = name != null ? arena.allocateUtf8String(name) : MemorySegment.NULL;
+            var ptr = name != null ? arena.allocateFrom(name) : MemorySegment.NULL;
             return (MemorySegment) MH_OPEN_MEMORY.invokeExact(ptr);
         } catch (Throwable t) { throw new SqliteException("snr_open_memory falló", t); }
     }
@@ -223,7 +223,7 @@ public final class SqliteLibrary {
     /** Ejecuta SQL sin resultado. Devuelve 0 en éxito, -1 en error. */
     public static int snr_exec(MemorySegment handle, String sql) {
         try (var arena = Arena.ofConfined()) {
-            return (int) MH_EXEC.invokeExact(handle, arena.allocateUtf8String(sql));
+            return (int) MH_EXEC.invokeExact(handle, arena.allocateFrom(sql));
         } catch (Throwable t) { throw new SqliteException("snr_exec falló", t); }
     }
 
@@ -248,7 +248,7 @@ public final class SqliteLibrary {
     /** Compila SQL en un prepared statement. Cerrar con {@link #snr_stmt_close}. */
     public static MemorySegment snr_prepare(MemorySegment handle, String sql) {
         try (var arena = Arena.ofConfined()) {
-            return (MemorySegment) MH_PREPARE.invokeExact(handle, arena.allocateUtf8String(sql));
+            return (MemorySegment) MH_PREPARE.invokeExact(handle, arena.allocateFrom(sql));
         } catch (Throwable t) { throw new SqliteException("snr_prepare falló", t); }
     }
 
@@ -291,7 +291,7 @@ public final class SqliteLibrary {
     /** Enlaza un String UTF-8 al parámetro {@code idx} (1-based). Si {@code val} es null, enlaza NULL. */
     public static int snr_bind_text(MemorySegment stmt, int idx, String val) {
         try (var arena = Arena.ofConfined()) {
-            var ptr = val != null ? arena.allocateUtf8String(val) : MemorySegment.NULL;
+            var ptr = val != null ? arena.allocateFrom(val) : MemorySegment.NULL;
             return (int) MH_BIND_TEXT.invokeExact(stmt, idx, ptr);
         } catch (Throwable t) { throw new SqliteException("snr_bind_text falló", t); }
     }
@@ -316,7 +316,7 @@ public final class SqliteLibrary {
     public static int snr_bind_blob(MemorySegment stmt, int idx, byte[] data) {
         if (data == null) return snr_bind_null(stmt, idx);
         try (var arena = Arena.ofConfined()) {
-            var seg = arena.allocateArray(ValueLayout.JAVA_BYTE, data);
+            var seg = arena.allocateFrom(ValueLayout.JAVA_BYTE, data);
             return snr_bind_blob(stmt, idx, seg, data.length);
         }
     }
@@ -327,7 +327,7 @@ public final class SqliteLibrary {
      */
     public static int snr_bind_parameter_index(MemorySegment stmt, String name) {
         try (var arena = Arena.ofConfined()) {
-            return (int) MH_BIND_PARAM_INDEX.invokeExact(stmt, arena.allocateUtf8String(name));
+            return (int) MH_BIND_PARAM_INDEX.invokeExact(stmt, arena.allocateFrom(name));
         } catch (Throwable t) { throw new SqliteException("snr_bind_parameter_index falló", t); }
     }
 
@@ -445,21 +445,21 @@ public final class SqliteLibrary {
     /** Crea un SAVEPOINT. Devuelve 0 en éxito. */
     public static int snr_savepoint(MemorySegment handle, String name) {
         try (var arena = Arena.ofConfined()) {
-            return (int) MH_SAVEPOINT.invokeExact(handle, arena.allocateUtf8String(name));
+            return (int) MH_SAVEPOINT.invokeExact(handle, arena.allocateFrom(name));
         } catch (Throwable t) { throw new SqliteException("snr_savepoint falló", t); }
     }
 
     /** Libera (confirma) el savepoint. Devuelve 0 en éxito. */
     public static int snr_release(MemorySegment handle, String name) {
         try (var arena = Arena.ofConfined()) {
-            return (int) MH_RELEASE.invokeExact(handle, arena.allocateUtf8String(name));
+            return (int) MH_RELEASE.invokeExact(handle, arena.allocateFrom(name));
         } catch (Throwable t) { throw new SqliteException("snr_release falló", t); }
     }
 
     /** Revierte hasta el savepoint (sin eliminarlo). Devuelve 0 en éxito. */
     public static int snr_rollback_to(MemorySegment handle, String name) {
         try (var arena = Arena.ofConfined()) {
-            return (int) MH_ROLLBACK_TO.invokeExact(handle, arena.allocateUtf8String(name));
+            return (int) MH_ROLLBACK_TO.invokeExact(handle, arena.allocateFrom(name));
         } catch (Throwable t) { throw new SqliteException("snr_rollback_to falló", t); }
     }
 
@@ -481,7 +481,7 @@ public final class SqliteLibrary {
     public static int snr_wal_checkpoint(MemorySegment handle, String dbName, int mode,
             MemorySegment outWalFrames, MemorySegment outCheckpointed) {
         try (var arena = Arena.ofConfined()) {
-            var ptr = dbName != null ? arena.allocateUtf8String(dbName) : MemorySegment.NULL;
+            var ptr = dbName != null ? arena.allocateFrom(dbName) : MemorySegment.NULL;
             var wf  = outWalFrames    != null ? outWalFrames    : MemorySegment.NULL;
             var ck  = outCheckpointed != null ? outCheckpointed : MemorySegment.NULL;
             return (int) MH_WAL_CHECKPOINT.invokeExact(handle, ptr, mode, wf, ck);

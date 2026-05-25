@@ -15,23 +15,24 @@
 #   ffm_version definido → oras pull ghcr.io/{owner}/ether-sqlite-ffm:{version}-{arch}
 #   ffm_version vacio    → actions/download-artifact rust-ffm-lib-{arch} (mismo run)
 #
-# Tres lineas de artefactos:
+# Dos lineas de artefactos:
 #
 #   A) Java 25 stable FFM (ether-sqlite-ffm-runtime):
 #      JAR thin + fat + GraalVM Native Image (amd64, arm64)
-#      Panama FFM estable (JEP 454). Compatible con GraalVM native-image.
+#      Panama FFM estable (JEP 454). GraalVM native-image viable sin enable-preview.
 #
 #   B) Java 21 preview FFM (ether-sqlite-ffm-java21-runtime):
 #      JAR thin + fat ONLY. Bytecode 65.65535 (minor=0xFFFF).
 #      NO es viable como native-image: bytecode preview bloquea GraalVM.
+#      Para native-image en Java 21 usar ether-sqlite-jni-runtime.
 #
 # Jobs:
-#   build-ffm25-jar     [ubuntu-latest]         → java-jar-ffm25
-#   build-ffm21-jar     [ubuntu-latest, JDK 21] → java-jar-ffm21
-#   build-native-ffm    [amd64, arm64]          → native-img-ffm25-{arch}
+#   build-ffm-jar    [ubuntu-latest]         → java-jar-ffm
+#   build-ffm21-jar  [ubuntu-latest, JDK 21] → java-jar-ffm21
+#   build-native-ffm [amd64, arm64]          → native-img-ffm-{arch}
 #
 # Grafo:
-#   build-ffm25-jar  (independiente)
+#   build-ffm-jar    (independiente)
 #   build-ffm21-jar  (independiente)
 #   build-native-ffm (independiente — descarga .so via GHCR o artifact)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -72,7 +73,7 @@ env:
 jobs:
 
   # ── 1. JARs Java 25 — Panama FFM estable (JEP 454, sin enable-preview) ───────
-  build-ffm25-jar:
+  build-ffm-jar:
     name: "Java 25 FFM JAR (thin + fat)"
     runs-on: ubuntu-latest
 
@@ -90,8 +91,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-ffm25-${{ hashFiles('sources/java/ether-sqlite-ffm-runtime/pom.xml', 'sources/java/ether-sqlite-core/pom.xml') }}
-          restore-keys: ${{ runner.os }}-maven-ffm25-
+          key: ${{ runner.os }}-maven-ffm-${{ hashFiles('sources/java/ether-sqlite-ffm-runtime/pom.xml', 'sources/java/ether-sqlite-core/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-ffm-
 
       - name: Set pom.xml versions from tag
         if: inputs.release_tag != ''
@@ -122,7 +123,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: java-jar-ffm25
+          name: java-jar-ffm
           path: dist/
 
   # ── 2. JARs Java 21 preview — Panama FFM preview (JEP 442, enable-preview) ───
@@ -235,8 +236,8 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.m2/repository
-          key: ${{ matrix.runner }}-maven-ffm25-native-${{ hashFiles('sources/java/ether-sqlite-ffm-runtime/pom.xml', 'sources/java/ether-sqlite-core/pom.xml') }}
-          restore-keys: ${{ matrix.runner }}-maven-ffm25-native-
+          key: ${{ matrix.runner }}-maven-ffm-native-${{ hashFiles('sources/java/ether-sqlite-ffm-runtime/pom.xml', 'sources/java/ether-sqlite-core/pom.xml') }}
+          restore-keys: ${{ matrix.runner }}-maven-ffm-native-
 
       - name: Set pom.xml versions from tag
         if: inputs.release_tag != ''
@@ -265,5 +266,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: native-img-ffm25-${{ matrix.arch }}
+          name: native-img-ffm-${{ matrix.arch }}
           path: out/

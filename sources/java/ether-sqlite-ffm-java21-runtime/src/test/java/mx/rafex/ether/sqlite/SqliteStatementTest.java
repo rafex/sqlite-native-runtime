@@ -589,7 +589,8 @@ class SqliteStatementTest {
 
     @Test
     void rawHandle_returnsNonNull() {
-        try (var stmt = db.prepare("SELECT 1")) {
+        try (var s = db.prepare("SELECT 1");
+             var stmt = (FfmJava21SqliteStatement) s) {
             var h = stmt.rawHandle();
             assertNotNull(h);
             assertFalse(h.equals(MemorySegment.NULL));
@@ -598,7 +599,7 @@ class SqliteStatementTest {
 
     @Test
     void rawHandle_afterClose_throws() {
-        var stmt = db.prepare("SELECT 1");
+        var stmt = (FfmJava21SqliteStatement) db.prepare("SELECT 1");
         stmt.close();
         assertThrows(SqliteException.class, stmt::rawHandle);
     }
@@ -614,10 +615,10 @@ class SqliteStatementTest {
 
     @Test
     void close_withOnCloseCallback() {
-        // El constructor package-private con onClose es el que usa SqliteConnection.prepare()
+        // El constructor package-private con onClose es el que usa FfmJava21SqliteConnection.prepare()
         // snr_stmt_close(NULL) es no-op en Rust — solo verificamos que el callback se llame
         boolean[] called = {false};
-        var stmt = new SqliteStatement(MemorySegment.NULL, () -> called[0] = true);
+        var stmt = new FfmJava21SqliteStatement(MemorySegment.NULL, () -> called[0] = true);
         stmt.close();
         assertTrue(called[0], "onClose debe llamarse al cerrar");
     }
@@ -625,7 +626,7 @@ class SqliteStatementTest {
     @Test
     void close_withoutOnCloseCallback() {
         // Constructor sin callback — cierre sin NPE
-        var stmt = new SqliteStatement(MemorySegment.NULL);
+        var stmt = new FfmJava21SqliteStatement(MemorySegment.NULL);
         assertDoesNotThrow(stmt::close);
     }
 
@@ -634,20 +635,20 @@ class SqliteStatementTest {
     @Test
     void lastError_doesNotThrow() {
         // Simplemente verificamos que el helper no lanza
-        assertDoesNotThrow(SqliteStatement::lastError);
+        assertDoesNotThrow(FfmJava21SqliteStatement::lastError);
     }
 
     // ── readInternalString / readAndFreeString ─────────────────────────────────
 
     @Test
     void readInternalString_null_returnsNull() {
-        assertNull(SqliteStatement.readInternalString(null));
-        assertNull(SqliteStatement.readInternalString(MemorySegment.NULL));
+        assertNull(FfmJava21SqliteStatement.readInternalString(null));
+        assertNull(FfmJava21SqliteStatement.readInternalString(MemorySegment.NULL));
     }
 
     @Test
     void readAndFreeString_null_returnsNull() {
-        assertNull(SqliteStatement.readAndFreeString(null));
-        assertNull(SqliteStatement.readAndFreeString(MemorySegment.NULL));
+        assertNull(FfmJava21SqliteStatement.readAndFreeString(null));
+        assertNull(FfmJava21SqliteStatement.readAndFreeString(MemorySegment.NULL));
     }
 }

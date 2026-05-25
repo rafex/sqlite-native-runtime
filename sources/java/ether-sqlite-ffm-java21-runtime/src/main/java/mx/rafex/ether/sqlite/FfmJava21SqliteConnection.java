@@ -80,7 +80,7 @@ public final class FfmJava21SqliteConnection implements SqliteConnection {
             throw new SqliteException("No se pudo abrir '%s': %s".formatted(path, lastError()));
         }
         LOG.fine(() -> "SQLite abierto: %s (SQLite %s)".formatted(path, sqliteVersion()));
-        return new SqliteConnection(h);
+        return new FfmJava21SqliteConnection(h);
     }
 
     /**
@@ -93,7 +93,7 @@ public final class FfmJava21SqliteConnection implements SqliteConnection {
         if (isNull(h)) {
             throw new SqliteException("No se pudo abrir '%s': %s".formatted(path, lastError()));
         }
-        return new SqliteConnection(h);
+        return new FfmJava21SqliteConnection(h);
     }
 
     /**
@@ -105,7 +105,7 @@ public final class FfmJava21SqliteConnection implements SqliteConnection {
         if (isNull(h)) {
             throw new SqliteException("No se pudo abrir :memory:: " + lastError());
         }
-        return new SqliteConnection(h);
+        return new FfmJava21SqliteConnection(h);
     }
 
     /**
@@ -117,7 +117,7 @@ public final class FfmJava21SqliteConnection implements SqliteConnection {
         if (isNull(h)) {
             throw new SqliteException("No se pudo abrir memoria '%s': %s".formatted(name, lastError()));
         }
-        return new SqliteConnection(h);
+        return new FfmJava21SqliteConnection(h);
     }
 
     // ── Operaciones básicas ───────────────────────────────────────────────────

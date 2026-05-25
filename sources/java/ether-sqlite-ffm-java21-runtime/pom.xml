@@ -11,20 +11,18 @@
   <packaging>jar</packaging>
 
   <name>ether-sqlite-ffm-java21-runtime</name>
-  <description>Binding Panama FFM para libether_sqlite_ffm_runtime — Java 21 preview (JEP 442, --enable-preview)</description>
+  <description>Binding Panama FFM para libether_sqlite_ffm_runtime — Java 21 preview (JEP 442, flag enable-preview). JAR only: bytecode 65.65535 (minor=0xFFFF) no es viable como GraalVM native-image. Para native-image en Java 21 usar ether-sqlite-jni-runtime.</description>
 
   <properties>
     <!--
-      Java 21 LTS con flag enable-preview: Panama FFM preview (JEP 442).
-      El bytecode generado (minor_version=0xFFFF) SOLO puede ejecutarse
-      en una JVM Java 21 con la flag enable-preview.
-      Para Java 25 stable ver el módulo ether-sqlite.
+      Java 21 LTS + flag enable-preview: Panama FFM preview (JEP 442).
+      Bytecode resultante: class file 65, minor version 0xFFFF (65535).
+      JAR ONLY — GraalVM native-image no acepta bytecode preview de otra
+      version principal. Para native-image en Java 21 usar ether-sqlite-jni-runtime.
     -->
-    <maven.compiler.release>21</maven.compiler.release>
+    <java.version>21</java.version>
+    <maven.compiler.release>${java.version}</maven.compiler.release>
     <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-
-    <!-- GraalVM Build Tools - native-maven-plugin -->
-    <native.maven.plugin.version>0.10.6</native.maven.plugin.version>
   </properties>
 
   <dependencies>
@@ -49,10 +47,8 @@
         <artifactId>maven-compiler-plugin</artifactId>
         <version>3.13.0</version>
         <configuration>
-          <release>21</release>
-          <compilerArgs>
-            <arg>--enable-preview</arg>
-          </compilerArgs>
+          <!-- Java 21 preview: Panama FFM (JEP 442) requiere flag enable-preview -->
+          <enablePreview>true</enablePreview>
         </configuration>
       </plugin>
 
@@ -62,10 +58,11 @@
         <version>3.5.2</version>
         <configuration>
           <!--
-            Flag enable-preview obligatoria en runtime: bytecode preview Java 21.
-            Los tests de integracion se excluyen por defecto.
+            Panama FFM necesita acceso nativo y flag enable-preview en runtime.
+            JaCoCo inyecta su agente via @{argLine}.
+            Los tests de integracion (@Tag("integration")) se excluyen por defecto.
           -->
-          <argLine>@{argLine} --enable-preview --enable-native-access=ALL-UNNAMED</argLine>
+          <argLine>@{argLine} --enable-native-access=ALL-UNNAMED --enable-preview</argLine>
           <excludedGroups>integration</excludedGroups>
         </configuration>
       </plugin>
@@ -73,7 +70,7 @@
       <plugin>
         <groupId>org.jacoco</groupId>
         <artifactId>jacoco-maven-plugin</artifactId>
-        <version>0.8.12</version>
+        <version>0.8.13</version>
         <executions>
           <execution>
             <id>jacoco-prepare-agent</id>
@@ -123,9 +120,9 @@
       </plugin>
 
       <!--
-        Fat JAR:
-          ether-sqlite-java21-runtime-{version}.jar      ← thin JAR
-          ether-sqlite-java21-runtime-{version}-fat.jar  ← fat JAR
+        Fat JAR: shadedArtifactAttached=true conserva el thin JAR e incluye dependencias:
+          ether-sqlite-ffm-java21-runtime-{version}.jar      <- thin JAR
+          ether-sqlite-ffm-java21-runtime-{version}-fat.jar  <- fat JAR
       -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -173,40 +170,7 @@
             <version>3.5.2</version>
             <configuration combine.self="override">
               <groups>integration</groups>
-              <argLine>@{argLine} --enable-preview --enable-native-access=ALL-UNNAMED</argLine>
-            </configuration>
-          </plugin>
-        </plugins>
-      </build>
-    </profile>
-
-    <!--
-      Perfil native: compila SmokeTest como GraalVM Native Image con bytecode Java 21 preview.
-      GraalVM AOT procesa el bytecode preview con la flag enable-preview.
-      El binario resultante NO requiere la flag en runtime.
-      Uso: JAVA_HOME=graalvm-25 mvn -Pnative package native:compile
-      Binario: target/ether-sqlite-java21
-    -->
-    <profile>
-      <id>native</id>
-      <build>
-        <plugins>
-          <plugin>
-            <groupId>org.graalvm.buildtools</groupId>
-            <artifactId>native-maven-plugin</artifactId>
-            <version>${native.maven.plugin.version}</version>
-            <extensions>true</extensions>
-            <configuration>
-              <imageName>ether-sqlite-java21</imageName>
-              <mainClass>mx.rafex.ether.sqlite.SmokeTest</mainClass>
-              <buildArgs>
-                <buildArg>--initialize-at-run-time=mx.rafex.ether.sqlite.SqliteLibrary</buildArg>
-                <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
-                <!-- Bytecode Java 21 preview: AOT requiere la flag enable-preview -->
-                <buildArg>--enable-preview</buildArg>
-                <buildArg>-cp</buildArg>
-                <buildArg>${project.build.outputDirectory}:${project.build.testOutputDirectory}</buildArg>
-              </buildArgs>
+              <argLine>@{argLine} --enable-native-access=ALL-UNNAMED --enable-preview</argLine>
             </configuration>
           </plugin>
         </plugins>
