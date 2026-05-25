@@ -5,23 +5,30 @@
 #   • push a main  (validar que main siempre está verde)
 #   • pull_request (validar antes de integrar)
 #
-# Jobs (paralelos):
-#   test-rust  → Debian 12 (workspace Rust completo):
-#                  TT-1: cargo test --lib        (137 unit tests en ether-sqlite-core)
-#                  TT-2: cargo test --test       (FFI contract en ether-sqlite-core)
-#                  TT-3: cargo build -p ether-sqlite-ffm  (cdylib FFM compila)
-#                  TT-4: cargo build -p ether-sqlite-jni  (cdylib JNI compila)
+# Inventario de proyectos
+# ───────────────────────
+#   Rust (3 crates — workspace sources/rust/):
+#     1. ether-sqlite-core   rlib    137 unit tests + FFI contract tests
+#     2. ether-sqlite-ffm    cdylib  re-exporta core → libether_sqlite_ffm_runtime.so
+#     3. ether-sqlite-jni    cdylib  ABI JNI       → libether_sqlite_jni_runtime.so
 #
-#   test-java  → Multi-stage Docker (compila FFM+JNI Rust, luego 3 suites Java):
-#                  java25-tester     (FFM estable Java 25, unit + integration)
-#                  java21ffm-tester  (FFM preview Java 21, unit + integration)
-#                  java21jni-tester  (JNI real Java 21,    unit + integration)
+#   Java/Maven (4 módulos — sources/java/):
+#     4. ether-sqlite-core            interfaces puras, sin tests (compilación implícita)
+#     5. ether-sqlite-ffm-runtime     Java 25 stable FFM — 5 clases de test
+#     6. ether-sqlite-ffm-java21-runtime Java 21 preview FFM — 5 clases de test
+#     7. ether-sqlite-jni-runtime     Java 21 JNI real    — 5 clases de test
 #
-# Nota sobre caches:
-#   Las dependencias Rust y Maven se descargan dentro de los contenedores Docker.
-#   El host del runner no comparte su filesystem con docker build, por lo que
-#   cachear ~/.cargo o ~/.m2 en el host no beneficia a las builds en contenedor.
-#   El cache de capas Docker (layer cache) es gestionado por el runner de GitHub.
+# Jobs (6) y dependencias:
+#
+#   [1] rust-core  ──────────────────────────────────── (paralelo, sin deps)
+#   [2] rust-ffm   ──→  [5] java-ffm-runtime            (artifact .so FFM)
+#                  ──→  [6] java-ffm21-runtime
+#   [3] rust-jni   ──→  [7] java-jni-runtime            (artifact .so JNI)
+#
+# Los jobs Java corren nativamente (mvnw en el runner) y descargan la .so
+# compilada por el job Rust correspondiente vía actions/upload-artifact.
+# Esto permite usar actions/cache para Cargo y Maven de forma efectiva
+# (a diferencia de builds en Docker, donde el host no comparte filesystem).
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: CI
@@ -30,15 +37,11 @@ on:
   push:
     branches: [main]
     paths:
-      # Código fuente Rust y Java
       - 'sources/**'
-      # Dockerfiles de test
       - 'containers/**'
-      # Scripts de build/test y archivos de configuración de Make/Just
       - 'scripts/**'
       - 'Makefile'
       - 'Justfile'
-      # El propio workflow (cambios en CI deben validarse)
       - '.github/workflows/ci.yml'
   pull_request:
     paths:
@@ -49,32 +52,266 @@ on:
       - 'Justfile'
       - '.github/workflows/ci.yml'
 
-# Cancela runs anteriores del mismo PR/branch para no saturar los runners
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-env:
-  CONTAINER_ENGINE: docker
-
 jobs:
 
-  # ── Rust: unit tests + FFI contract + compilación cdylib FFM y JNI ──────────
-  test-rust:
-    name: "🦀 Rust (unit + FFI + build FFM/JNI)"
+  # ── [1/6]  ether-sqlite-core  (Rust rlib) ────────────────────────────────────
+  #  TT-1: 137 unit tests internos (#[cfg(test)])
+  #  TT-2: FFI contract tests (tests/ffi_contract.rs)
+  rust-core:
+    name: "🦀 [1/6] ether-sqlite-core — test (unit + FFI)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sources/rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('sources/rust/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: "TT-1 — unit tests"
+        run: cargo test -p ether-sqlite-core --lib --color always
+
+      - name: "TT-2 — FFI contract tests"
+        run: cargo test -p ether-sqlite-core --test ffi_contract --color always
+
+  # ── [2/6]  ether-sqlite-ffm  (Rust cdylib) ───────────────────────────────────
+  #  Compila libether_sqlite_ffm_runtime.so y lo publica como artifact
+  #  para los jobs Java 5 y 6 que dependen de él.
+  rust-ffm:
+    name: "🦀 [2/6] ether-sqlite-ffm — build (cdylib FFM)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sources/rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('sources/rust/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build libether_sqlite_ffm_runtime.so
+        run: cargo build -p ether-sqlite-ffm --release
+
+      - name: Upload FFM library artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libether-sqlite-ffm-${{ github.run_id }}
+          path: sources/rust/target/release/libether_sqlite_ffm_runtime.so
+          retention-days: 1
+
+  # ── [3/6]  ether-sqlite-jni  (Rust cdylib) ───────────────────────────────────
+  #  Compila libether_sqlite_jni_runtime.so y lo publica como artifact
+  #  para el job Java 7 que depende de él.
+  rust-jni:
+    name: "🦀 [3/6] ether-sqlite-jni — build (cdylib JNI)"
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: sources/rust
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ runner.os }}-cargo-${{ hashFiles('sources/rust/Cargo.lock') }}
+          restore-keys: ${{ runner.os }}-cargo-
+
+      - name: Build libether_sqlite_jni_runtime.so
+        run: cargo build -p ether-sqlite-jni --release
+
+      - name: Upload JNI library artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: libether-sqlite-jni-${{ github.run_id }}
+          path: sources/rust/target/release/libether_sqlite_jni_runtime.so
+          retention-days: 1
+
+  # ── [4/6]  ether-sqlite-core  (Java — sin tests propios) ─────────────────────
+  #  Interfaces puras. No hay tests que ejecutar. Se compila para verificar
+  #  que el módulo base es válido antes de que los módulos runtime lo usen.
+  java-core:
+    name: "☕ [4/6] ether-sqlite-core — compile (interfaces)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build image and run Rust tests
-        run: make container-test-rust
+      - name: Setup GraalVM JDK 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  # ── Java: unit + integration — FFM Java 25, FFM Java 21, JNI Java 21 ────────
-  test-java:
-    name: "☕ Java (unit + integration — FFM25 / FFM21 / JNI21)"
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-core-${{ hashFiles('sources/java/ether-sqlite-core/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-core-
+
+      - name: Compile ether-sqlite-core
+        run: ./mvnw compile -f sources/java/ether-sqlite-core/pom.xml --no-transfer-progress -q
+
+  # ── [5/6]  ether-sqlite-ffm-runtime  (Java 25 stable FFM) ────────────────────
+  #  Panama FFM estable (JEP 454). Sin --enable-preview.
+  #  TT-3 : unit tests (5 clases, excluye @Tag("integration"))
+  #  TT-3i: integration tests (@Tag("integration"))
+  java-ffm-runtime:
+    name: "☕ [5/6] ether-sqlite-ffm-runtime — test (Java 25)"
     runs-on: ubuntu-latest
+    needs: [rust-ffm]
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build image and run Java tests
-        run: make container-test-java
+      - name: Setup GraalVM JDK 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-ffm25-${{ hashFiles('sources/java/ether-sqlite-core/pom.xml', 'sources/java/ether-sqlite-ffm-runtime/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-ffm25-
+
+      - name: Download FFM library
+        uses: actions/download-artifact@v4
+        with:
+          name: libether-sqlite-ffm-${{ github.run_id }}
+          path: /tmp/snr-libs
+
+      - name: Install ether-sqlite-core
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+
+      - name: "TT-3 — unit tests"
+        run: ./mvnw test -f sources/java/ether-sqlite-ffm-runtime/pom.xml -Djacoco.skip=true --no-transfer-progress
+        env:
+          ETHER_SQLITE_LIB: /tmp/snr-libs/libether_sqlite_ffm_runtime.so
+
+      - name: "TT-3i — integration tests"
+        run: ./mvnw test -f sources/java/ether-sqlite-ffm-runtime/pom.xml -Pintegration -Djacoco.skip=true --no-transfer-progress
+        env:
+          ETHER_SQLITE_LIB: /tmp/snr-libs/libether_sqlite_ffm_runtime.so
+
+  # ── [6/6 parte A]  ether-sqlite-ffm-java21-runtime  (Java 21 preview FFM) ────
+  #  Panama FFM preview (JEP 442). --enable-preview ya en surefire argLine del pom.xml.
+  #  TT-3 : unit tests (5 clases)
+  #  TT-3i: integration tests
+  java-ffm21-runtime:
+    name: "☕ [6/6] ether-sqlite-ffm-java21-runtime — test (Java 21 preview)"
+    runs-on: ubuntu-latest
+    needs: [rust-ffm]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup GraalVM JDK 21
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '21'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-ffm21-${{ hashFiles('sources/java/ether-sqlite-core/pom.xml', 'sources/java/ether-sqlite-ffm-java21-runtime/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-ffm21-
+
+      - name: Download FFM library
+        uses: actions/download-artifact@v4
+        with:
+          name: libether-sqlite-ffm-${{ github.run_id }}
+          path: /tmp/snr-libs
+
+      - name: Install ether-sqlite-core
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+
+      - name: "TT-3 — unit tests"
+        run: ./mvnw test -f sources/java/ether-sqlite-ffm-java21-runtime/pom.xml -Djacoco.skip=true --no-transfer-progress
+        env:
+          ETHER_SQLITE_LIB: /tmp/snr-libs/libether_sqlite_ffm_runtime.so
+
+      - name: "TT-3i — integration tests"
+        run: ./mvnw test -f sources/java/ether-sqlite-ffm-java21-runtime/pom.xml -Pintegration -Djacoco.skip=true --no-transfer-progress
+        env:
+          ETHER_SQLITE_LIB: /tmp/snr-libs/libether_sqlite_ffm_runtime.so
+
+  # ── [7/7]  ether-sqlite-jni-runtime  (Java 21 JNI real) ──────────────────────
+  #  JNI clásico. Sin --enable-preview ni --enable-native-access.
+  #  TT-3 : unit tests (5 clases)
+  #  TT-3i: integration tests
+  java-jni-runtime:
+    name: "☕ [7/7] ether-sqlite-jni-runtime — test (Java 21 JNI)"
+    runs-on: ubuntu-latest
+    needs: [rust-jni]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Java 21 (Temurin)
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ~/.m2/repository
+          key: ${{ runner.os }}-maven-jni21-${{ hashFiles('sources/java/ether-sqlite-core/pom.xml', 'sources/java/ether-sqlite-jni-runtime/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-jni21-
+
+      - name: Download JNI library
+        uses: actions/download-artifact@v4
+        with:
+          name: libether-sqlite-jni-${{ github.run_id }}
+          path: /tmp/snr-libs
+
+      - name: Install ether-sqlite-core
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+
+      - name: "TT-3 — unit tests"
+        run: ./mvnw test -f sources/java/ether-sqlite-jni-runtime/pom.xml -Djacoco.skip=true --no-transfer-progress
+        env:
+          ETHER_SQLITE_JNI_LIB: /tmp/snr-libs/libether_sqlite_jni_runtime.so
+
+      - name: "TT-3i — integration tests"
+        run: ./mvnw test -f sources/java/ether-sqlite-jni-runtime/pom.xml -Pintegration -Djacoco.skip=true --no-transfer-progress
+        env:
+          ETHER_SQLITE_JNI_LIB: /tmp/snr-libs/libether_sqlite_jni_runtime.so
