@@ -56,6 +56,12 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+# Usar Node.js 24 para todas las actions (checkout, cache, upload/download-artifact,
+# setup-java). Evita los warnings de deprecación de Node.js 20 y prepara el workflow
+# para el cambio forzado de junio 2026.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
 
   # ── [1/6]  ether-sqlite-core  (Rust rlib) ────────────────────────────────────
