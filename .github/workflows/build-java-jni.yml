@@ -33,6 +33,12 @@
 
 name: Build Java JNI
 
+# workflow_call hereda los permisos del workflow llamante (release.yml: packages: read).
+# workflow_dispatch necesita declarar packages: read explicitamente para oras pull.
+permissions:
+  packages: read
+  contents: read
+
 on:
   workflow_call:
     inputs:

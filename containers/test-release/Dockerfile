@@ -5,54 +5,46 @@
 #   linux/amd64  (x86_64)
 #   linux/arm64  (aarch64)
 #
+# Artefactos validados:
+#   FFM (Panama FFM, Java 25 stable, GraalVM native-image):
+#     libether_sqlite_ffm_runtime-{arch}.so
+#     ether-sqlite-ffm-runtime-{ver}.jar       (thin)
+#     ether-sqlite-ffm-runtime-{ver}-fat.jar   (fat)
+#     ether-sqlite-ffm-linux-{arch}.bin        (native image pre-compilado)
+#
+#   JNI (JNI real, Java 21, GraalVM native-image):
+#     libether_sqlite_jni_runtime-{arch}.so
+#     ether-sqlite-jni-runtime-{ver}.jar       (thin, bytecode Java 21)
+#     ether-sqlite-jni-runtime-{ver}-fat.jar   (fat)
+#     ether-sqlite-jni-linux-{arch}.bin        (native image pre-compilado)
+#
 # Etapas:
-#   installer     → descarga install.sh del release y lo ejecuta para instalar
-#                   la .so; descarga y verifica (SHA256) JARs y binario nativo
-#   test-jvm      → ejecuta la suite con thin JAR y fat JAR en GraalVM JDK 25
-#   build-native  → compila Main.java como GraalVM Native Image (--no-fallback)
-#   test-release  → ejecuta el binario pre-compilado del release y el binario
-#                   compilado en esta build; arrastra el marcador de test-jvm
+#   installer        → descarga install.sh del release y verifica todos los
+#                      artefactos (SHA256); instala las .so en /artifacts/
+#   test-jvm-ffm     → prueba FFM fat JAR en Java 25 (stable FFM, sin preview)
+#   test-jvm-jni     → prueba JNI fat JAR en Java 21 (sin --enable-preview)
+#   build-native-ffm → compila MainFfm.java como GraalVM Native Image (Java 25)
+#   build-native-jni → compila MainJni.java como GraalVM Native Image (Java 21→25)
+#   test-release     → ejecuta pre-built + compilados; arrastra todos los OK
 #
 # Uso manual (local):
-#   # Último release publicado, ambas arquitecturas (requiere QEMU o runners nativos):
 #   docker buildx build --platform linux/amd64,linux/arm64 \
 #     --progress=plain --target test-release containers/test-release/
 #
-#   # Versión específica en una sola arquitectura:
+#   # Versión específica:
 #   docker buildx build --platform linux/amd64 \
-#     --build-arg ETHER_SQLITE_VERSION=v0.1.1 \
+#     --build-arg ETHER_SQLITE_VERSION=v0.2.0 \
 #     --progress=plain --target test-release containers/test-release/
-#
-# Uso en CI (via just o el workflow verify-release.yml):
-#   just test-release                  ← ambas archs, último release
-#   just test-release v0.1.1           ← versión específica
 #
 # Variables:
 #   ETHER_SQLITE_VERSION   versión del release a probar (default: latest)
-#   GRAALVM_TAG   tag de las imágenes GraalVM (default: 25)
+#   GRAALVM_TAG            tag de GraalVM para native-image (default: 25)
 # ─────────────────────────────────────────────────────────────────────────────
 
 ARG ETHER_SQLITE_VERSION=latest
-# JVM tag para las pruebas: debe ser Java 21 (el JAR lleva bytecode preview 21.0xFFFF)
-ARG JVM_TAG=21
-# GraalVM tag para la compilacion de Native Image (requiere native-image tool)
 ARG GRAALVM_TAG=25
 
-# ── Etapa 1: install.sh del release + descarga de JARs y binario nativo ───────
-#
-# Se usa debian:12-slim (imagen mínima) para mantener el tamaño pequeño.
-#
-# install.sh se descarga del propio release (no del repositorio) para validar
-# que el script publicado funciona correctamente.
-#
-# Sin sudo disponible en el contenedor, install.sh usa modo usuario:
-#   → /root/.local/lib/libether_sqlite_runtime.so
-# Las etapas siguientes copian la .so a /usr/local/lib/ donde la JVM la
-# encontrará automáticamente.
-#
-# TARGETARCH es establecido por Docker buildx automáticamente.
-# Cuando se usa `docker build` sin --platform en un runner nativo, se infiere
-# desde uname -m como fallback (el mismo mecanismo que usa install.sh).
+# ── Etapa 1: installer — descarga y verifica todos los artefactos ─────────────
 FROM debian:12-slim AS installer
 
 ARG ETHER_SQLITE_VERSION
@@ -86,7 +78,7 @@ RUN set -e; \
     BASE="${DL}/${VERSION}"; \
     VER="${VERSION#v}"; \
     \
-    # ── Inferir arquitectura (TARGETARCH puede estar vacío sin --platform) ── \
+    # ── Inferir arquitectura ─────────────────────────────────────────────── \
     TARCH="${TARGETARCH:-}"; \
     if [ -z "${TARCH}" ]; then \
         case "$(uname -m)" in \
@@ -104,19 +96,19 @@ RUN set -e; \
     printf ">>> Arquitectura: %s\n\n" "${ARCH_LABEL}"; \
     \
     # ── install.sh del release — valida el script de instalación publicado ── \
-    # Descarga el install.sh desde los assets del release (no del repo),       \
-    # lo ejecuta con ETHER_SQLITE_VERSION fijado para instalar exactamente esta versión. \
-    # Sin sudo en el contenedor → modo usuario → /root/.local/lib/             \
     printf ">>> Ejecutando install.sh del release %s...\n" "${VERSION}"; \
     curl -fsSL "${BASE}/install.sh" -o /tmp/install.sh; \
     chmod +x /tmp/install.sh; \
     ETHER_SQLITE_VERSION="${VERSION}" sh /tmp/install.sh; \
     \
-    # Verificar que la librería quedó instalada correctamente \
-    LIB_PATH="/root/.local/lib/libether_sqlite_runtime.so"; \
-    [ -f "${LIB_PATH}" ] || { echo "ERROR: install.sh no instaló la librería en ${LIB_PATH}"; exit 1; }; \
-    printf "\n✓ Librería instalada en %s\n" "${LIB_PATH}"; \
-    cp "${LIB_PATH}" /artifacts/libether_sqlite_runtime.so; \
+    # El install.sh instala ambas .so en /root/.local/lib/ \
+    FFM_LIB="/root/.local/lib/libether_sqlite_ffm_runtime-${ARCH_LABEL}.so"; \
+    JNI_LIB="/root/.local/lib/libether_sqlite_jni_runtime-${ARCH_LABEL}.so"; \
+    [ -f "${FFM_LIB}" ] || { echo "ERROR: install.sh no instaló ${FFM_LIB}"; exit 1; }; \
+    [ -f "${JNI_LIB}" ] || { echo "ERROR: install.sh no instaló ${JNI_LIB}"; exit 1; }; \
+    cp "${FFM_LIB}" /artifacts/libether_sqlite_ffm_runtime.so; \
+    cp "${JNI_LIB}" /artifacts/libether_sqlite_jni_runtime.so; \
+    printf "\n✓ Librerías FFM y JNI instaladas\n"; \
     \
     # ── Función de descarga + verificación SHA256 ─────────────────────────── \
     fetch_and_verify() { \
@@ -134,108 +126,155 @@ RUN set -e; \
         printf "  ✓ SHA256 OK: %s\n" "$(basename "${DEST}")"; \
     }; \
     \
-    printf "\n>>> Descargando y verificando JARs y binario nativo...\n"; \
+    printf "\n>>> Descargando y verificando artefactos...\n"; \
     \
-    # ── Thin JAR ─────────────────────────────────────────────────────────── \
-    fetch_and_verify "${BASE}/ether-sqlite-runtime-${VER}.jar" \
-                     "/artifacts/ether-sqlite-runtime-${VER}.jar"; \
+    # ── FFM JARs ─────────────────────────────────────────────────────────── \
+    fetch_and_verify "${BASE}/ether-sqlite-ffm-runtime-${VER}.jar" \
+                     "/artifacts/ether-sqlite-ffm-runtime-${VER}.jar"; \
+    fetch_and_verify "${BASE}/ether-sqlite-ffm-runtime-${VER}-fat.jar" \
+                     "/artifacts/ether-sqlite-ffm-runtime-${VER}-fat.jar"; \
     \
-    # ── Fat JAR ──────────────────────────────────────────────────────────── \
-    fetch_and_verify "${BASE}/ether-sqlite-runtime-${VER}-fat.jar" \
-                     "/artifacts/ether-sqlite-runtime-${VER}-fat.jar"; \
+    # ── JNI JARs ─────────────────────────────────────────────────────────── \
+    fetch_and_verify "${BASE}/ether-sqlite-jni-runtime-${VER}.jar" \
+                     "/artifacts/ether-sqlite-jni-runtime-${VER}.jar"; \
+    fetch_and_verify "${BASE}/ether-sqlite-jni-runtime-${VER}-fat.jar" \
+                     "/artifacts/ether-sqlite-jni-runtime-${VER}-fat.jar"; \
     \
-    # ── Binario nativo pre-compilado del release ──────────────────────────── \
-    fetch_and_verify "${BASE}/ether-sqlite-${ARCH_LABEL}.bin" \
-                     "/artifacts/ether-sqlite-${ARCH_LABEL}.bin"; \
-    chmod +x "/artifacts/ether-sqlite-${ARCH_LABEL}.bin"; \
-    cp "/artifacts/ether-sqlite-${ARCH_LABEL}.bin" /artifacts/ether-sqlite-prebuilt; \
+    # ── Binarios nativos pre-compilados ──────────────────────────────────── \
+    fetch_and_verify "${BASE}/ether-sqlite-ffm-${ARCH_LABEL}.bin" \
+                     "/artifacts/ether-sqlite-ffm-${ARCH_LABEL}.bin"; \
+    chmod +x "/artifacts/ether-sqlite-ffm-${ARCH_LABEL}.bin"; \
+    cp "/artifacts/ether-sqlite-ffm-${ARCH_LABEL}.bin" /artifacts/ether-sqlite-ffm-prebuilt; \
+    \
+    fetch_and_verify "${BASE}/ether-sqlite-jni-${ARCH_LABEL}.bin" \
+                     "/artifacts/ether-sqlite-jni-${ARCH_LABEL}.bin"; \
+    chmod +x "/artifacts/ether-sqlite-jni-${ARCH_LABEL}.bin"; \
+    cp "/artifacts/ether-sqlite-jni-${ARCH_LABEL}.bin" /artifacts/ether-sqlite-jni-prebuilt; \
     \
     printf "\n>>> Artefactos listos:\n"; \
-    ls -lh /artifacts/*.so /artifacts/*.jar /artifacts/ether-sqlite-prebuilt
+    ls -lh /artifacts/*.so /artifacts/*.jar /artifacts/*-prebuilt
 
-# ── Etapa 2: Pruebas en la JVM ────────────────────────────────────────────────
+# ── Etapa 2: test-jvm-ffm — FFM fat JAR en Java 25 ───────────────────────────
 #
-# El JAR usa bytecode Java 21 con flag de preview (minor_version=0xFFFF).
-# DEBE ejecutarse en Java 21 con --enable-preview.
-# Java 22+ rechazaría el bytecode con UnsupportedClassVersionError.
-FROM eclipse-temurin:21-jre AS test-jvm
-
-ARG JVM_TAG
+# Panama FFM es estable en Java 25 (JEP 454). No requiere --enable-preview.
+# Solo --enable-native-access=ALL-UNNAMED para acceso a memoria nativa.
+FROM ghcr.io/graalvm/jdk-community:25 AS test-jvm-ffm
 
 WORKDIR /test
 
-COPY --from=installer /artifacts/libether_sqlite_runtime.so /usr/local/lib/
+COPY --from=installer /artifacts/libether_sqlite_ffm_runtime.so /usr/local/lib/
 RUN ldconfig
 
 COPY --from=installer /artifacts/ /artifacts/
-COPY src/Main.java ./Main.java
+COPY src/MainFfm.java ./MainFfm.java
 
-# Compilar la suite con el thin JAR
 RUN VER="$(cat /artifacts/VERSION_NUM)"; \
-    javac -cp "/artifacts/ether-sqlite-runtime-${VER}.jar" Main.java
+    javac -cp "/artifacts/ether-sqlite-ffm-runtime-${VER}-fat.jar" MainFfm.java
 
-# ── Test 1: thin JAR ──────────────────────────────────────────────────────────
-# --enable-preview obligatorio: el JAR tiene bytecode Java 21 preview (JEP 442)
+# ── Test 1: FFM fat JAR en JVM Java 25 ───────────────────────────────────────
 RUN printf "\n╔══════════════════════════════════════════╗\n" && \
-    printf   "║  Test 1/4 — JVM thin JAR                ║\n" && \
+    printf   "║  Test 1/6 — JVM FFM fat JAR (Java 25)  ║\n" && \
     printf   "╚══════════════════════════════════════════╝\n\n" && \
     VER="$(cat /artifacts/VERSION_NUM)" && \
-    java --enable-preview \
-         --enable-native-access=ALL-UNNAMED \
-         -Dether.sqlite.test.mode=JVM-thin \
-         -cp "/artifacts/ether-sqlite-runtime-${VER}.jar:." \
-         Main
+    java --enable-native-access=ALL-UNNAMED \
+         -Dether.sqlite.test.mode=JVM-FFM-fat \
+         -cp "/artifacts/ether-sqlite-ffm-runtime-${VER}-fat.jar:." \
+         MainFfm
 
-# ── Test 2: fat JAR ───────────────────────────────────────────────────────────
-RUN printf "\n╔══════════════════════════════════════════╗\n" && \
-    printf   "║  Test 2/4 — JVM fat JAR                 ║\n" && \
-    printf   "╚══════════════════════════════════════════╝\n\n" && \
-    VER="$(cat /artifacts/VERSION_NUM)" && \
-    java --enable-preview \
-         --enable-native-access=ALL-UNNAMED \
-         -Dether.sqlite.test.mode=JVM-fat \
-         -cp "/artifacts/ether-sqlite-runtime-${VER}-fat.jar:." \
-         Main
+RUN echo "JVM FFM tests OK" > /test/jvm-ffm-ok
 
-# Marcador de éxito (la etapa test-release lo arrastra para crear dependencia)
-RUN echo "JVM tests OK" > /test/jvm-ok
-
-# ── Etapa 3: GraalVM Native Image ─────────────────────────────────────────────
+# ── Etapa 3: test-jvm-jni — JNI fat JAR en Java 21 ──────────────────────────
 #
-# ghcr.io/graalvm/native-image-community:25 incluye native-image pre-instalado.
-# Se usa --no-fallback para garantizar compilación nativa pura (sin JVM backup).
-FROM ghcr.io/graalvm/native-image-community:${GRAALVM_TAG} AS build-native
+# JNI no requiere --enable-preview ni --enable-native-access.
+# Compatible con Java 21+ (bytecode class 65.0).
+FROM eclipse-temurin:21-jdk-noble AS test-jvm-jni
+
+WORKDIR /test
+
+COPY --from=installer /artifacts/libether_sqlite_jni_runtime.so /usr/local/lib/
+RUN ldconfig
+
+COPY --from=installer /artifacts/ /artifacts/
+COPY src/MainJni.java ./MainJni.java
+
+RUN VER="$(cat /artifacts/VERSION_NUM)"; \
+    javac -cp "/artifacts/ether-sqlite-jni-runtime-${VER}-fat.jar" MainJni.java
+
+# ── Test 2: JNI fat JAR en JVM Java 21 ───────────────────────────────────────
+RUN printf "\n╔══════════════════════════════════════════╗\n" && \
+    printf   "║  Test 2/6 — JVM JNI fat JAR (Java 21)  ║\n" && \
+    printf   "╚══════════════════════════════════════════╝\n\n" && \
+    VER="$(cat /artifacts/VERSION_NUM)" && \
+    java -Dether.sqlite.test.mode=JVM-JNI-fat \
+         -cp "/artifacts/ether-sqlite-jni-runtime-${VER}-fat.jar:." \
+         MainJni
+
+RUN echo "JVM JNI tests OK" > /test/jvm-jni-ok
+
+# ── Etapa 4: build-native-ffm — GraalVM Native Image FFM (Java 25) ───────────
+#
+# Panama FFM estable en Java 25 — native-image sin --enable-preview.
+# --initialize-at-run-time evita que la carga de la .so ocurra en build-time.
+FROM ghcr.io/graalvm/native-image-community:${GRAALVM_TAG} AS build-native-ffm
 
 ARG GRAALVM_TAG
 
 WORKDIR /build
 
-COPY --from=installer /artifacts/libether_sqlite_runtime.so /usr/local/lib/
+COPY --from=installer /artifacts/libether_sqlite_ffm_runtime.so /usr/local/lib/
 RUN ldconfig
 
 COPY --from=installer /artifacts/ /artifacts/
-COPY src/Main.java ./Main.java
+COPY src/MainFfm.java ./MainFfm.java
 
 RUN VER="$(cat /artifacts/VERSION_NUM)"; \
-    JAR="/artifacts/ether-sqlite-runtime-${VER}.jar"; \
-    printf "\n>>> Compilando Main.java como Native Image (GraalVM %s)...\n\n" "${GRAALVM_TAG}"; \
-    javac --enable-preview --release 21 -cp "${JAR}" Main.java; \
+    FAT_JAR="/artifacts/ether-sqlite-ffm-runtime-${VER}-fat.jar"; \
+    printf "\n>>> Compilando MainFfm.java como Native Image FFM (GraalVM %s)...\n\n" "${GRAALVM_TAG}"; \
+    javac -cp "${FAT_JAR}" MainFfm.java; \
     native-image \
         --initialize-at-run-time=mx.rafex.ether.sqlite.SqliteLibrary \
         --enable-native-access=ALL-UNNAMED \
-        --enable-preview \
         --no-fallback \
-        -H:Name=ether-sqlite-release-test \
-        -cp "${JAR}:." \
-        Main; \
-    printf "\n>>> Binario compilado:\n"; \
-    ls -lh ether-sqlite-release-test
+        -H:Name=ether-sqlite-ffm-release-test \
+        -cp "${FAT_JAR}:." \
+        MainFfm; \
+    printf "\n>>> Binario FFM compilado:\n"; \
+    ls -lh ether-sqlite-ffm-release-test
 
-# ── Etapa 4: Ejecutar binarios nativos ────────────────────────────────────────
+# ── Etapa 5: build-native-jni — GraalVM Native Image JNI (Java 21 bytecode) ──
+#
+# GraalVM 25 compila bytecode Java 21 (class 65.0, sin preview).
+# JNI no requiere --enable-native-access.
+# --initialize-at-run-time evita carga de la .so en build-time.
+FROM ghcr.io/graalvm/native-image-community:${GRAALVM_TAG} AS build-native-jni
+
+ARG GRAALVM_TAG
+
+WORKDIR /build
+
+COPY --from=installer /artifacts/libether_sqlite_jni_runtime.so /usr/local/lib/
+RUN ldconfig
+
+COPY --from=installer /artifacts/ /artifacts/
+COPY src/MainJni.java ./MainJni.java
+
+RUN VER="$(cat /artifacts/VERSION_NUM)"; \
+    FAT_JAR="/artifacts/ether-sqlite-jni-runtime-${VER}-fat.jar"; \
+    printf "\n>>> Compilando MainJni.java como Native Image JNI (GraalVM %s)...\n\n" "${GRAALVM_TAG}"; \
+    javac -source 21 -target 21 -cp "${FAT_JAR}" MainJni.java; \
+    native-image \
+        --initialize-at-run-time=mx.rafex.ether.sqlite.jni.SqliteLibraryJni \
+        --no-fallback \
+        -H:Name=ether-sqlite-jni-release-test \
+        -cp "${FAT_JAR}:." \
+        MainJni; \
+    printf "\n>>> Binario JNI compilado:\n"; \
+    ls -lh ether-sqlite-jni-release-test
+
+# ── Etapa 6: test-release — ejecutar binarios nativos ────────────────────────
 #
 # debian:12-slim + libstdc++6 es suficiente para ejecutar binarios GraalVM.
-# Esta etapa tiene dependencia explícita de test-jvm (COPY --from=test-jvm):
-# si test-jvm falló, el build falla aunque no llegue a este punto.
+# Las dependencias de JVM se arrastran via COPY --from=test-jvm-*.
 FROM debian:12-slim AS test-release
 
 RUN apt-get update \
@@ -244,27 +283,49 @@ RUN apt-get update \
 
 WORKDIR /test
 
-COPY --from=installer /artifacts/libether_sqlite_runtime.so /usr/local/lib/
+COPY --from=installer        /artifacts/libether_sqlite_ffm_runtime.so /usr/local/lib/
+COPY --from=installer        /artifacts/libether_sqlite_jni_runtime.so  /usr/local/lib/
 RUN ldconfig
 
-# Arrastrar el marcador: si test-jvm no completó, este COPY falla → build falla
-COPY --from=test-jvm    /test/jvm-ok              /test/jvm-ok
-COPY --from=installer   /artifacts/ether-sqlite-prebuilt ./ether-sqlite-prebuilt
-COPY --from=build-native /build/ether-sqlite-release-test   ./ether-sqlite-release-test
+# Arrastrar marcadores JVM: si alguna etapa JVM falló, estos COPY fallan
+COPY --from=test-jvm-ffm     /test/jvm-ffm-ok                     /test/jvm-ffm-ok
+COPY --from=test-jvm-jni     /test/jvm-jni-ok                     /test/jvm-jni-ok
 
-# ── Test 3: binario nativo pre-compilado del release ─────────────────────────
-RUN printf "\n╔══════════════════════════════════════════╗\n" && \
-    printf   "║  Test 3/4 — Native Image (prebuilt)     ║\n" && \
-    printf   "╚══════════════════════════════════════════╝\n\n" && \
-    ./ether-sqlite-prebuilt && \
-    printf "\n✓ ether-sqlite prebuilt: OK\n"
+# Binarios pre-compilados del release
+COPY --from=installer        /artifacts/ether-sqlite-ffm-prebuilt  ./ether-sqlite-ffm-prebuilt
+COPY --from=installer        /artifacts/ether-sqlite-jni-prebuilt  ./ether-sqlite-jni-prebuilt
 
-# ── Test 4: Main.java compilado como Native Image en esta build ───────────────
+# Binarios compilados en esta build
+COPY --from=build-native-ffm /build/ether-sqlite-ffm-release-test  ./ether-sqlite-ffm-release-test
+COPY --from=build-native-jni /build/ether-sqlite-jni-release-test  ./ether-sqlite-jni-release-test
+
+# ── Test 3: FFM native image pre-compilado del release ────────────────────────
 RUN printf "\n╔══════════════════════════════════════════╗\n" && \
-    printf   "║  Test 4/4 — Native Image (esta build)   ║\n" && \
+    printf   "║  Test 3/6 — Native FFM (prebuilt)       ║\n" && \
     printf   "╚══════════════════════════════════════════╝\n\n" && \
-    ./ether-sqlite-release-test && \
-    printf "\n✓ ether-sqlite-release-test native: OK\n"
+    ./ether-sqlite-ffm-prebuilt && \
+    printf "\n✓ ether-sqlite-ffm prebuilt: OK\n"
+
+# ── Test 4: JNI native image pre-compilado del release ────────────────────────
+RUN printf "\n╔══════════════════════════════════════════╗\n" && \
+    printf   "║  Test 4/6 — Native JNI (prebuilt)       ║\n" && \
+    printf   "╚══════════════════════════════════════════╝\n\n" && \
+    ./ether-sqlite-jni-prebuilt && \
+    printf "\n✓ ether-sqlite-jni prebuilt: OK\n"
+
+# ── Test 5: MainFfm compilado como Native Image en esta build ─────────────────
+RUN printf "\n╔══════════════════════════════════════════╗\n" && \
+    printf   "║  Test 5/6 — Native FFM (esta build)     ║\n" && \
+    printf   "╚══════════════════════════════════════════╝\n\n" && \
+    ./ether-sqlite-ffm-release-test && \
+    printf "\n✓ ether-sqlite-ffm-release-test: OK\n"
+
+# ── Test 6: MainJni compilado como Native Image en esta build ─────────────────
+RUN printf "\n╔══════════════════════════════════════════╗\n" && \
+    printf   "║  Test 6/6 — Native JNI (esta build)     ║\n" && \
+    printf   "╚══════════════════════════════════════════╝\n\n" && \
+    ./ether-sqlite-jni-release-test && \
+    printf "\n✓ ether-sqlite-jni-release-test: OK\n"
 
 # ── Resumen final ─────────────────────────────────────────────────────────────
 RUN printf "\n"; \
@@ -272,8 +333,10 @@ RUN printf "\n"; \
     printf "║           RESULTADO FINAL                ║\n"; \
     printf "╠══════════════════════════════════════════╣\n"; \
     printf "║  ✓ install.sh del release    — OK        ║\n"; \
-    printf "║  ✓ JVM + thin JAR            — OK        ║\n"; \
-    printf "║  ✓ JVM + fat JAR             — OK        ║\n"; \
-    printf "║  ✓ Native Image prebuilt     — OK        ║\n"; \
-    printf "║  ✓ Native Image (esta build) — OK        ║\n"; \
+    printf "║  ✓ JVM FFM fat JAR (Java 25) — OK        ║\n"; \
+    printf "║  ✓ JVM JNI fat JAR (Java 21) — OK        ║\n"; \
+    printf "║  ✓ Native FFM prebuilt       — OK        ║\n"; \
+    printf "║  ✓ Native JNI prebuilt       — OK        ║\n"; \
+    printf "║  ✓ Native FFM (esta build)   — OK        ║\n"; \
+    printf "║  ✓ Native JNI (esta build)   — OK        ║\n"; \
     printf "╚══════════════════════════════════════════╝\n\n"
