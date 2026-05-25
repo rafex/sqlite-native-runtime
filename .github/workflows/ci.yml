@@ -171,6 +171,10 @@ jobs:
   java-core:
     name: "☕ [4/6] ether-sqlite-core — compile (interfaces)"
     runs-on: ubuntu-latest
+    # MAVEN_REPO: repositorio local explícito dentro del workspace para evitar
+    # interferencias con ~/.m2 que graalvm/setup-graalvm puede configurar.
+    env:
+      MAVEN_REPO: ${{ github.workspace }}/.m2-local
     steps:
       - uses: actions/checkout@v4
 
@@ -184,12 +188,12 @@ jobs:
       - name: Cache Maven repository
         uses: actions/cache@v4
         with:
-          path: ~/.m2/repository
+          path: ${{ github.workspace }}/.m2-local
           key: ${{ runner.os }}-maven-core-${{ hashFiles('sources/java/ether-sqlite-core/pom.xml') }}
           restore-keys: ${{ runner.os }}-maven-core-
 
       - name: Compile ether-sqlite-core
-        run: ./mvnw compile -f sources/java/ether-sqlite-core/pom.xml --no-transfer-progress -q
+        run: ./mvnw compile -f sources/java/ether-sqlite-core/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" --no-transfer-progress -q
 
   # ── [5/6]  ether-sqlite-ffm-runtime  (Java 25 stable FFM) ────────────────────
   #  Panama FFM estable (JEP 454). Sin --enable-preview.
@@ -199,6 +203,11 @@ jobs:
     name: "☕ [5/6] ether-sqlite-ffm-runtime — test (Java 25)"
     runs-on: ubuntu-latest
     needs: [rust-ffm]
+    # MAVEN_REPO fijo dentro del workspace: garantiza que install y test lean
+    # el mismo repositorio local, independientemente de lo que configure
+    # graalvm/setup-graalvm en ~/.m2/settings.xml.
+    env:
+      MAVEN_REPO: ${{ github.workspace }}/.m2-local
     steps:
       - uses: actions/checkout@v4
 
@@ -212,7 +221,7 @@ jobs:
       - name: Cache Maven repository
         uses: actions/cache@v4
         with:
-          path: ~/.m2/repository
+          path: ${{ github.workspace }}/.m2-local
           key: ${{ runner.os }}-maven-ffm25-${{ hashFiles('sources/java/ether-sqlite-core/pom.xml', 'sources/java/ether-sqlite-ffm-runtime/pom.xml') }}
           restore-keys: ${{ runner.os }}-maven-ffm25-
 
@@ -223,19 +232,19 @@ jobs:
           path: /tmp/snr-libs
 
       - name: Install ether-sqlite-core
-        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
 
       - name: "TT-3 — unit tests"
-        run: ./mvnw test -f sources/java/ether-sqlite-ffm-runtime/pom.xml -Djacoco.skip=true --no-transfer-progress
+        run: ./mvnw test -f sources/java/ether-sqlite-ffm-runtime/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -Djacoco.skip=true --no-transfer-progress
         env:
           ETHER_SQLITE_LIB: /tmp/snr-libs/libether_sqlite_ffm_runtime.so
 
       - name: "TT-3i — integration tests"
-        run: ./mvnw test -f sources/java/ether-sqlite-ffm-runtime/pom.xml -Pintegration -Djacoco.skip=true --no-transfer-progress
+        run: ./mvnw test -f sources/java/ether-sqlite-ffm-runtime/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -Pintegration -Djacoco.skip=true --no-transfer-progress
         env:
           ETHER_SQLITE_LIB: /tmp/snr-libs/libether_sqlite_ffm_runtime.so
 
-  # ── [6/6 parte A]  ether-sqlite-ffm-java21-runtime  (Java 21 preview FFM) ────
+  # ── [6/6]  ether-sqlite-ffm-java21-runtime  (Java 21 preview FFM) ────────────
   #  Panama FFM preview (JEP 442). --enable-preview ya en surefire argLine del pom.xml.
   #  TT-3 : unit tests (5 clases)
   #  TT-3i: integration tests
@@ -243,6 +252,8 @@ jobs:
     name: "☕ [6/6] ether-sqlite-ffm-java21-runtime — test (Java 21 preview)"
     runs-on: ubuntu-latest
     needs: [rust-ffm]
+    env:
+      MAVEN_REPO: ${{ github.workspace }}/.m2-local
     steps:
       - uses: actions/checkout@v4
 
@@ -256,7 +267,7 @@ jobs:
       - name: Cache Maven repository
         uses: actions/cache@v4
         with:
-          path: ~/.m2/repository
+          path: ${{ github.workspace }}/.m2-local
           key: ${{ runner.os }}-maven-ffm21-${{ hashFiles('sources/java/ether-sqlite-core/pom.xml', 'sources/java/ether-sqlite-ffm-java21-runtime/pom.xml') }}
           restore-keys: ${{ runner.os }}-maven-ffm21-
 
@@ -267,15 +278,15 @@ jobs:
           path: /tmp/snr-libs
 
       - name: Install ether-sqlite-core
-        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
 
       - name: "TT-3 — unit tests"
-        run: ./mvnw test -f sources/java/ether-sqlite-ffm-java21-runtime/pom.xml -Djacoco.skip=true --no-transfer-progress
+        run: ./mvnw test -f sources/java/ether-sqlite-ffm-java21-runtime/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -Djacoco.skip=true --no-transfer-progress
         env:
           ETHER_SQLITE_LIB: /tmp/snr-libs/libether_sqlite_ffm_runtime.so
 
       - name: "TT-3i — integration tests"
-        run: ./mvnw test -f sources/java/ether-sqlite-ffm-java21-runtime/pom.xml -Pintegration -Djacoco.skip=true --no-transfer-progress
+        run: ./mvnw test -f sources/java/ether-sqlite-ffm-java21-runtime/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -Pintegration -Djacoco.skip=true --no-transfer-progress
         env:
           ETHER_SQLITE_LIB: /tmp/snr-libs/libether_sqlite_ffm_runtime.so
 
@@ -287,6 +298,8 @@ jobs:
     name: "☕ [7/7] ether-sqlite-jni-runtime — test (Java 21 JNI)"
     runs-on: ubuntu-latest
     needs: [rust-jni]
+    env:
+      MAVEN_REPO: ${{ github.workspace }}/.m2-local
     steps:
       - uses: actions/checkout@v4
 
@@ -299,7 +312,7 @@ jobs:
       - name: Cache Maven repository
         uses: actions/cache@v4
         with:
-          path: ~/.m2/repository
+          path: ${{ github.workspace }}/.m2-local
           key: ${{ runner.os }}-maven-jni21-${{ hashFiles('sources/java/ether-sqlite-core/pom.xml', 'sources/java/ether-sqlite-jni-runtime/pom.xml') }}
           restore-keys: ${{ runner.os }}-maven-jni21-
 
@@ -310,14 +323,14 @@ jobs:
           path: /tmp/snr-libs
 
       - name: Install ether-sqlite-core
-        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
 
       - name: "TT-3 — unit tests"
-        run: ./mvnw test -f sources/java/ether-sqlite-jni-runtime/pom.xml -Djacoco.skip=true --no-transfer-progress
+        run: ./mvnw test -f sources/java/ether-sqlite-jni-runtime/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -Djacoco.skip=true --no-transfer-progress
         env:
           ETHER_SQLITE_JNI_LIB: /tmp/snr-libs/libether_sqlite_jni_runtime.so
 
       - name: "TT-3i — integration tests"
-        run: ./mvnw test -f sources/java/ether-sqlite-jni-runtime/pom.xml -Pintegration -Djacoco.skip=true --no-transfer-progress
+        run: ./mvnw test -f sources/java/ether-sqlite-jni-runtime/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -Pintegration -Djacoco.skip=true --no-transfer-progress
         env:
           ETHER_SQLITE_JNI_LIB: /tmp/snr-libs/libether_sqlite_jni_runtime.so
