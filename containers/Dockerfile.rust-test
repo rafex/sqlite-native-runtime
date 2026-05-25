@@ -1,5 +1,5 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# TT-1 + TT-2 — Rust unit tests + FFI contract tests
+# TT-1 + TT-2 — Rust unit tests + FFI contract tests + compilación del workspace
 #
 # Uso local  : make container-test-rust           (Podman)
 # CI         : make container-test-rust CONTAINER_ENGINE=docker
@@ -12,9 +12,15 @@
 #
 # Estructura del workspace Rust (sources/rust/):
 #   Cargo.toml          <- workspace
-#   ether-sqlite-core/  <- rlib, contiene los 137 unit tests + tests/ffi_contract.rs
-#   ether-sqlite-ffm/   <- cdylib, re-exporta core (sin tests propios)
-#   ether-sqlite-jni/   <- cdylib, ABI JNI (sin tests propios)
+#   ether-sqlite-core/  <- rlib, 137 unit tests + tests/ffi_contract.rs
+#   ether-sqlite-ffm/   <- cdylib, re-exporta core (sin tests propios, se compila)
+#   ether-sqlite-jni/   <- cdylib, ABI JNI (sin tests propios, se compila)
+#
+# Pasos de validación:
+#   TT-1: cargo test -p ether-sqlite-core --lib       (137 unit tests internos)
+#   TT-2: cargo test -p ether-sqlite-core --test      (FFI contract tests)
+#   TT-3: cargo build -p ether-sqlite-ffm              (compila el cdylib FFM)
+#   TT-4: cargo build -p ether-sqlite-jni              (compila el cdylib JNI)
 # ─────────────────────────────────────────────────────────────────────────────
 
 FROM debian:12-slim
@@ -58,14 +64,23 @@ RUN mkdir -p ether-sqlite-core/src ether-sqlite-ffm/src ether-sqlite-jni/src \
 RUN cargo fetch
 
 # ── Código fuente real ─────────────────────────────────────────────────────
-# Solo se copia ether-sqlite-core: los tests (TT-1, TT-2) viven ahí.
-# ether-sqlite-ffm y ether-sqlite-jni son cdylib sin tests propios.
+# Se copian los tres crates:
+#   ether-sqlite-core: tests TT-1 (--lib) y TT-2 (--test ffi_contract)
+#   ether-sqlite-ffm:  cdylib sin tests — se verifica que compila
+#   ether-sqlite-jni:  cdylib sin tests — se verifica que compila
 COPY sources/rust/ether-sqlite-core/src   ./ether-sqlite-core/src
 COPY sources/rust/ether-sqlite-core/tests ./ether-sqlite-core/tests
+COPY sources/rust/ether-sqlite-ffm/src    ./ether-sqlite-ffm/src
+COPY sources/rust/ether-sqlite-jni/src    ./ether-sqlite-jni/src
 
-# ── Tests ──────────────────────────────────────────────────────────────────
-# TT-1: cargo test -p ether-sqlite-core --lib   → 137 tests #[cfg(test)] internos
-# TT-2: cargo test -p ether-sqlite-core --test  → tests FFI contract (ffi_contract.rs)
+# ── Tests y compilación del workspace ─────────────────────────────────────
+# TT-1: 137 unit tests internos de ether-sqlite-core
+# TT-2: FFI contract tests (tests/ffi_contract.rs)
+# TT-3: cargo build -p ether-sqlite-ffm  → verifica que el cdylib FFM compila
+# TT-4: cargo build -p ether-sqlite-jni  → verifica que el cdylib JNI compila
 CMD ["sh", "-c", \
   "cargo test -p ether-sqlite-core --lib --color always \
-   && cargo test -p ether-sqlite-core --test ffi_contract --color always"]
+   && cargo test -p ether-sqlite-core --test ffi_contract --color always \
+   && cargo build -p ether-sqlite-ffm --color always \
+   && cargo build -p ether-sqlite-jni --color always \
+   && echo '✓ ether-sqlite-ffm y ether-sqlite-jni compilan correctamente'"]

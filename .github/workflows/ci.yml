@@ -6,11 +6,22 @@
 #   • pull_request (validar antes de integrar)
 #
 # Jobs (paralelos):
-#   test-rust  → TT-1 (unit) + TT-2 (FFI contract)   Debian 12 (ether-sqlite-core Rust)
-#   test-java  → TT-3 (unit) + TT-3i (integration)   multi-stage:
-#                  java25-tester     (FFM estable, Java 25)
-#                  java21ffm-tester  (FFM preview, Java 21)
-#                  java21jni-tester  (JNI real, Java 21)
+#   test-rust  → Debian 12 (workspace Rust completo):
+#                  TT-1: cargo test --lib        (137 unit tests en ether-sqlite-core)
+#                  TT-2: cargo test --test       (FFI contract en ether-sqlite-core)
+#                  TT-3: cargo build -p ether-sqlite-ffm  (cdylib FFM compila)
+#                  TT-4: cargo build -p ether-sqlite-jni  (cdylib JNI compila)
+#
+#   test-java  → Multi-stage Docker (compila FFM+JNI Rust, luego 3 suites Java):
+#                  java25-tester     (FFM estable Java 25, unit + integration)
+#                  java21ffm-tester  (FFM preview Java 21, unit + integration)
+#                  java21jni-tester  (JNI real Java 21,    unit + integration)
+#
+# Nota sobre caches:
+#   Las dependencias Rust y Maven se descargan dentro de los contenedores Docker.
+#   El host del runner no comparte su filesystem con docker build, por lo que
+#   cachear ~/.cargo o ~/.m2 en el host no beneficia a las builds en contenedor.
+#   El cache de capas Docker (layer cache) es gestionado por el runner de GitHub.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: CI
@@ -48,39 +59,22 @@ env:
 
 jobs:
 
-  # ── TT-1 + TT-2 — Rust unit tests + FFI contract tests ──────────────────────
+  # ── Rust: unit tests + FFI contract + compilación cdylib FFM y JNI ──────────
   test-rust:
-    name: "🦀 Rust (TT-1 unit + TT-2 FFI)"
+    name: "🦀 Rust (unit + FFI + build FFM/JNI)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Cache Cargo registry
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-          key: ${{ runner.os }}-cargo-${{ hashFiles('sources/rust/Cargo.lock') }}
-          restore-keys: ${{ runner.os }}-cargo-
 
       - name: Build image and run Rust tests
         run: make container-test-rust
 
-  # ── TT-3 + TT-3i — Java unit tests + integration tests ──────────────────────
+  # ── Java: unit + integration — FFM Java 25, FFM Java 21, JNI Java 21 ────────
   test-java:
-    name: "☕ Java (TT-3 unit + TT-3i integration)"
+    name: "☕ Java (unit + integration — FFM25 / FFM21 / JNI21)"
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-
-      - name: Cache Maven repository
-        uses: actions/cache@v4
-        with:
-          path: ~/.m2/repository
-          key: ${{ runner.os }}-maven-${{ hashFiles('sources/java/**/pom.xml') }}
-          restore-keys: ${{ runner.os }}-maven-
 
       - name: Build image and run Java tests
         run: make container-test-java
