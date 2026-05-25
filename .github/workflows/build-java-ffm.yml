@@ -82,6 +82,10 @@ jobs:
   build-ffm-jar:
     name: "Java 25 FFM JAR (thin + fat)"
     runs-on: ubuntu-latest
+    # MAVEN_REPO: repo local explícito para evitar interferencias de
+    # graalvm/setup-graalvm con ~/.m2/settings.xml (puede redirigir el localRepository).
+    env:
+      MAVEN_REPO: ${{ github.workspace }}/.m2-local
 
     steps:
       - uses: actions/checkout@v4
@@ -96,7 +100,7 @@ jobs:
       - name: Cache Maven repository
         uses: actions/cache@v4
         with:
-          path: ~/.m2/repository
+          path: ${{ github.workspace }}/.m2-local
           key: ${{ runner.os }}-maven-ffm-${{ hashFiles('sources/java/ether-sqlite-ffm-runtime/pom.xml', 'sources/java/ether-sqlite-core/pom.xml') }}
           restore-keys: ${{ runner.os }}-maven-ffm-
 
@@ -105,23 +109,25 @@ jobs:
         run: |
           VERSION="${{ inputs.release_tag }}"
           VERSION="${VERSION#v}"
-          ./mvnw versions:set -f sources/java/ether-sqlite-core/pom.xml \
-            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+          # ether-sqlite-core NO se versiona: es dependencia interna no publicada.
+          # Solo el modulo runtime lleva la version del release.
+          # Si se cambiara core a 0.3.6 pero el pom.xml runtime referencia core:0.1.0,
+          # Maven no encontraría 0.1.0 en el repo local → fallo de resolución.
           ./mvnw versions:set -f sources/java/ether-sqlite-ffm-runtime/pom.xml \
             -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
 
       - name: Build + install ether-sqlite-core
-        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
 
       - name: Build Java 25 FFM thin JAR + fat JAR
         working-directory: sources/java/ether-sqlite-ffm-runtime
-        run: ./mvnw package -DskipTests --no-transfer-progress
+        run: ./mvnw package -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
 
       - name: Collect artifacts
         run: |
           mkdir -p dist
           VERSION=$(./mvnw -f sources/java/ether-sqlite-ffm-runtime/pom.xml \
-            help:evaluate -Dexpression=project.version -q -DforceStdout)
+            -Dmaven.repo.local="${MAVEN_REPO}" help:evaluate -Dexpression=project.version -q -DforceStdout)
           cp "sources/java/ether-sqlite-ffm-runtime/target/ether-sqlite-ffm-runtime-${VERSION}.jar" \
              "dist/ether-sqlite-ffm-runtime-${VERSION}.jar"
           cp "sources/java/ether-sqlite-ffm-runtime/target/ether-sqlite-ffm-runtime-${VERSION}-fat.jar" \
@@ -136,6 +142,8 @@ jobs:
   build-ffm21-jar:
     name: "Java 21 FFM JAR (thin + fat, preview)"
     runs-on: ubuntu-latest
+    env:
+      MAVEN_REPO: ${{ github.workspace }}/.m2-local
 
     steps:
       - uses: actions/checkout@v4
@@ -150,7 +158,7 @@ jobs:
       - name: Cache Maven repository
         uses: actions/cache@v4
         with:
-          path: ~/.m2/repository
+          path: ${{ github.workspace }}/.m2-local
           key: ${{ runner.os }}-maven-ffm21-${{ hashFiles('sources/java/ether-sqlite-ffm-java21-runtime/pom.xml', 'sources/java/ether-sqlite-core/pom.xml') }}
           restore-keys: ${{ runner.os }}-maven-ffm21-
 
@@ -159,23 +167,22 @@ jobs:
         run: |
           VERSION="${{ inputs.release_tag }}"
           VERSION="${VERSION#v}"
-          ./mvnw versions:set -f sources/java/ether-sqlite-core/pom.xml \
-            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+          # ether-sqlite-core NO se versiona: dependencia interna, no publicada.
           ./mvnw versions:set -f sources/java/ether-sqlite-ffm-java21-runtime/pom.xml \
             -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
 
       - name: Build + install ether-sqlite-core
-        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
 
       - name: Build Java 21 FFM thin JAR + fat JAR
         working-directory: sources/java/ether-sqlite-ffm-java21-runtime
-        run: ./mvnw package -DskipTests --no-transfer-progress
+        run: ./mvnw package -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
 
       - name: Collect artifacts
         run: |
           mkdir -p dist
           VERSION=$(./mvnw -f sources/java/ether-sqlite-ffm-java21-runtime/pom.xml \
-            help:evaluate -Dexpression=project.version -q -DforceStdout)
+            -Dmaven.repo.local="${MAVEN_REPO}" help:evaluate -Dexpression=project.version -q -DforceStdout)
           cp "sources/java/ether-sqlite-ffm-java21-runtime/target/ether-sqlite-ffm-java21-runtime-${VERSION}.jar" \
              "dist/ether-sqlite-ffm-java21-runtime-${VERSION}.jar"
           cp "sources/java/ether-sqlite-ffm-java21-runtime/target/ether-sqlite-ffm-java21-runtime-${VERSION}-fat.jar" \
@@ -190,6 +197,8 @@ jobs:
   build-native-ffm:
     name: "Native Image FFM Java 25 (${{ matrix.arch }})"
     runs-on: ${{ matrix.runner }}
+    env:
+      MAVEN_REPO: ${{ github.workspace }}/.m2-local
     strategy:
       fail-fast: false
       matrix:
@@ -241,7 +250,7 @@ jobs:
       - name: Cache Maven repository
         uses: actions/cache@v4
         with:
-          path: ~/.m2/repository
+          path: ${{ github.workspace }}/.m2-local
           key: ${{ matrix.runner }}-maven-ffm-native-${{ hashFiles('sources/java/ether-sqlite-ffm-runtime/pom.xml', 'sources/java/ether-sqlite-core/pom.xml') }}
           restore-keys: ${{ matrix.runner }}-maven-ffm-native-
 
@@ -250,19 +259,18 @@ jobs:
         run: |
           VERSION="${{ inputs.release_tag }}"
           VERSION="${VERSION#v}"
-          ./mvnw versions:set -f sources/java/ether-sqlite-core/pom.xml \
-            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+          # ether-sqlite-core NO se versiona: dependencia interna, no publicada.
           ./mvnw versions:set -f sources/java/ether-sqlite-ffm-runtime/pom.xml \
             -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
 
       - name: Build + install ether-sqlite-core
-        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -DskipTests --no-transfer-progress -q
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
 
       - name: Build GraalVM Native Image (FFM Java 25)
         working-directory: sources/java/ether-sqlite-ffm-runtime
         env:
           ETHER_SQLITE_LIB: ${{ github.workspace }}/dist/${{ matrix.lib }}
-        run: ./mvnw -Pnative package native:compile -DskipTests --no-transfer-progress
+        run: ./mvnw -Pnative package native:compile -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
 
       - name: Collect artifact
         run: |
