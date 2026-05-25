@@ -5,6 +5,11 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ## [Unreleased]
 
+## [v0.3.6] — 2026-05-25
+
+### 🐛 Correcciones
+- usar repo local explícito para Maven en todos los jobs Java
+
 ## [v0.3.5] — 2026-05-25
 
 ### ✨ Nuevas funcionalidades
