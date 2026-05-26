@@ -27,6 +27,15 @@ CARGO_TOOLCHAIN="${CARGO_TOOLCHAIN:-${SNR_CARGO_TOOLCHAIN}}"
 CONTAINER_ENGINE="${CONTAINER_ENGINE:-podman}"
 GLIBC_MIN="${GLIBC_MIN:-2.17}"
 
+# ── Versiones de librerías nativas (desde VERSIONS en la raíz del repo) ───────
+# Las variables de entorno tienen prioridad sobre el archivo (permiten override).
+if [[ -f "${ROOT}/VERSIONS" ]]; then
+  _FFM_FILE="$(grep '^FFM_VERSION=' "${ROOT}/VERSIONS" | cut -d= -f2 | tr -d '[:space:]')"
+  _JNI_FILE="$(grep '^JNI_VERSION=' "${ROOT}/VERSIONS" | cut -d= -f2 | tr -d '[:space:]')"
+  FFM_VERSION="${FFM_VERSION:-${_FFM_FILE}}"
+  JNI_VERSION="${JNI_VERSION:-${_JNI_FILE}}"
+fi
+
 # ── Rutas derivadas ───────────────────────────────────────────────────────────
 JAVA_DIR="${ROOT}/sources/java/ether-sqlite-ffm-runtime"
 RUST_DIR="${ROOT}/sources/rust"
@@ -48,3 +57,4 @@ export GRAALVM_HOME CARGO_TOOLCHAIN CONTAINER_ENGINE GLIBC_MIN
 export JAVA_DIR RUST_DIR CONTAINERS_DIR
 export CARGO RUSTC CARGO_BIN
 export ETHER_SQLITE_FFM_LIB ETHER_SQLITE_JNI_LIB ETHER_SQLITE_LIB
+export FFM_VERSION JNI_VERSION

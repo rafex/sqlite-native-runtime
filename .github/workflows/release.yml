@@ -116,11 +116,13 @@ jobs:
         run: |
           FFM_V="${{ inputs.ffm_version }}"
           JNI_V="${{ inputs.jni_version }}"
+          # Si no vienen como input, leer desde el archivo VERSIONS del repo.
+          # Formato esperado: FFM_VERSION=0.1.0  (una por línea, sin espacios)
           if [ -z "$FFM_V" ]; then
-            FFM_V="$(cat FFM_VERSION)"
+            FFM_V="$(grep '^FFM_VERSION=' VERSIONS | cut -d= -f2 | tr -d '[:space:]')"
           fi
           if [ -z "$JNI_V" ]; then
-            JNI_V="$(cat JNI_VERSION)"
+            JNI_V="$(grep '^JNI_VERSION=' VERSIONS | cut -d= -f2 | tr -d '[:space:]')"
           fi
           echo "ffm_version=${FFM_V}" >> $GITHUB_OUTPUT
           echo "jni_version=${JNI_V}" >> $GITHUB_OUTPUT

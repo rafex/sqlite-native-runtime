@@ -1,0 +1,17 @@
+# VERSIONS — Versiones activas de las librerías nativas Rust publicadas en GHCR.
+#
+# Actualiza estos valores antes de lanzar un release:
+#   1. Edita FFM_VERSION y/o JNI_VERSION
+#   2. Publica las librerías:  just rust-publish
+#   3. Lanza el release:       just release-dispatch v0.X.Y
+#
+# Usado por:
+#   - release.yml           (prepare job → determinar versiones)
+#   - just rust-publish     (build-rust.yml workflow_dispatch)
+#   - just release-dispatch (release.yml workflow_dispatch)
+#
+# Formato: KEY=VALUE sin espacios, sin comillas.
+# Compatible con `source VERSIONS` en bash y con `grep/cut` en CI.
+
+FFM_VERSION=0.1.0
+JNI_VERSION=0.1.0
