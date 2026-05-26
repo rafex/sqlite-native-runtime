@@ -39,10 +39,10 @@
 
 name: Build Java FFM
 
-# workflow_call hereda los permisos del workflow llamante (release.yml: packages: read).
-# workflow_dispatch necesita declarar packages: read explicitamente para oras pull.
+# packages: write — publicar JARs y binarios nativos en GHCR via oras push
+# contents: read  — checkout del repo
 permissions:
-  packages: read
+  packages: write
   contents: read
 
 on:
@@ -133,6 +133,26 @@ jobs:
           cp "sources/java/ether-sqlite-ffm-runtime/target/ether-sqlite-ffm-runtime-${VERSION}-fat.jar" \
              "dist/ether-sqlite-ffm-runtime-${VERSION}-fat.jar"
 
+      - name: Setup ORAS
+        if: inputs.release_tag != ''
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        if: inputs.release_tag != ''
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push JARs FFM Java 25 a GHCR
+        if: inputs.release_tag != ''
+        working-directory: dist
+        run: |
+          VERSION="${{ inputs.release_tag }}"
+          VERSION="${VERSION#v}"
+          IMAGE="ghcr.io/${{ github.repository_owner }}/ether-sqlite-ffm-runtime:${VERSION}"
+          oras push "${IMAGE}" \
+            "ether-sqlite-ffm-runtime-${VERSION}.jar:application/java-archive" \
+            "ether-sqlite-ffm-runtime-${VERSION}-fat.jar:application/java-archive"
+          echo "Publicado: ${IMAGE}"
+
       - uses: actions/upload-artifact@v4
         with:
           name: java-jar-ffm
@@ -187,6 +207,26 @@ jobs:
              "dist/ether-sqlite-ffm-java21-runtime-${VERSION}.jar"
           cp "sources/java/ether-sqlite-ffm-java21-runtime/target/ether-sqlite-ffm-java21-runtime-${VERSION}-fat.jar" \
              "dist/ether-sqlite-ffm-java21-runtime-${VERSION}-fat.jar"
+
+      - name: Setup ORAS
+        if: inputs.release_tag != ''
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        if: inputs.release_tag != ''
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push JARs FFM Java 21 preview a GHCR
+        if: inputs.release_tag != ''
+        working-directory: dist
+        run: |
+          VERSION="${{ inputs.release_tag }}"
+          VERSION="${VERSION#v}"
+          IMAGE="ghcr.io/${{ github.repository_owner }}/ether-sqlite-ffm-java21-runtime:${VERSION}"
+          oras push "${IMAGE}" \
+            "ether-sqlite-ffm-java21-runtime-${VERSION}.jar:application/java-archive" \
+            "ether-sqlite-ffm-java21-runtime-${VERSION}-fat.jar:application/java-archive"
+          echo "Publicado: ${IMAGE}"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -277,6 +317,24 @@ jobs:
           mkdir -p out
           cp sources/java/ether-sqlite-ffm-runtime/target/ether-sqlite out/${{ matrix.binary }}
           chmod +x out/${{ matrix.binary }}
+
+      - name: Setup ORAS (si no se hizo antes)
+        if: inputs.release_tag != '' && inputs.ffm_version == ''
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR (si no se hizo antes)
+        if: inputs.release_tag != '' && inputs.ffm_version == ''
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io -u ${{ github.actor }} --password-stdin
+
+      - name: Push binario nativo FFM a GHCR
+        if: inputs.release_tag != ''
+        working-directory: out
+        run: |
+          VERSION="${{ inputs.release_tag }}"
+          VERSION="${VERSION#v}"
+          IMAGE="ghcr.io/${{ github.repository_owner }}/ether-sqlite-ffm-native:${VERSION}-${{ matrix.arch }}"
+          oras push "${IMAGE}" "${{ matrix.binary }}:application/octet-stream"
+          echo "Publicado: ${IMAGE}"
 
       - uses: actions/upload-artifact@v4
         with:
