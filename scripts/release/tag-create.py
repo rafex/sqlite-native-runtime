@@ -168,8 +168,8 @@ def prepend_change_md(version: str, body: str, today: str) -> None:
 
 def git_commit_and_tag(version: str, body: str) -> None:
     _run(["git", "add", str(CHANGE_MD), str(RELEASE_MD)])
-    _run(["git", "commit", "-m", f"chore(release): {version}"])
-    print(f"  ✓ commit      ← chore(release): {version}")
+    _run(["git", "commit", "-m", f"chore(package): {version}"])
+    print(f"  ✓ commit      ← chore(package): {version}")
 
     # Tag anotado: el mensaje es el cuerpo del release (multilinea)
     _run(["git", "tag", "-a", version, "-m", body])
