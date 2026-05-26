@@ -5,6 +5,18 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es/1.1.0/).
 
 ## [Unreleased]
 
+## [v0.4.0] — 2026-05-25
+
+### ✨ Nuevas funcionalidades
+- publicar JARs y binarios nativos en GHCR via oras push
+- archivo VERSIONS unificado + comandos just rust-publish/release-dispatch
+
+### 🐛 Correcciones
+- corregir instalación de .so en Dockerfile del release test
+
+### ⚙️  CI / Build
+- rediseño en tres flujos (validate / publish / release)
+
 ## [v0.3.6] — 2026-05-25
 
 ### 🐛 Correcciones
