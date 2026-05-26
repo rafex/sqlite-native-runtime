@@ -186,6 +186,9 @@ jobs:
           echo "→ JNI native arm64: ether-sqlite-jni-native:${NAT_V}-arm64"
           oras pull "${REG}/${OWNER}/ether-sqlite-jni-native:${NAT_V}-arm64"
 
+      - name: Agregar install.sh a artifacts
+        run: cp scripts/release/install.sh artifacts/install.sh
+
       - name: Listar artefactos descargados
         run: ls -lh artifacts/
 
@@ -193,6 +196,8 @@ jobs:
         working-directory: artifacts
         run: |
           for f in *; do
+            # No calcular SHA256 del propio SHA256
+            [[ "$f" == *.sha256 ]] && continue
             sha256sum "$f" > "${f}.sha256"
             echo "  $(cat "${f}.sha256")"
           done
@@ -206,5 +211,4 @@ jobs:
           gh release create "${{ inputs.release_tag }}" \
             --title "Release ${{ inputs.release_tag }}" \
             --notes-file "${NOTES_FILE}" \
-            artifacts/* \
-            scripts/release/install.sh
+            artifacts/*
