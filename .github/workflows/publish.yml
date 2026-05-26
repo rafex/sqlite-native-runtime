@@ -1,0 +1,559 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# publish.yml — Flujo 2: Publicación por tag
+#
+# Dispara en:
+#   push de tag : v{MAJOR}.{MINOR}.{PATCH}[-sufijo]  (ej. v1.0.0, v1.0.0-rc.1)
+#
+# Compila TODO y publica en GitHub Packages (GHCR). No crea GitHub Release.
+# El release final se construye manualmente con: just release <tag>
+#
+# Paquetes publicados en GHCR (con prefijo ghcr.io/{owner}/):
+#
+#   Rust .so:
+#     ether-sqlite-ffm:{version}-amd64   → libether_sqlite_ffm_runtime-linux-amd64.so
+#     ether-sqlite-ffm:{version}-arm64   → libether_sqlite_ffm_runtime-linux-arm64.so
+#     ether-sqlite-jni:{version}-amd64   → libether_sqlite_jni_runtime-linux-amd64.so
+#     ether-sqlite-jni:{version}-arm64   → libether_sqlite_jni_runtime-linux-arm64.so
+#
+#   Java fat JARs:
+#     ether-sqlite-ffm-runtime:{version}       → thin + fat JAR (Java 25 stable FFM)
+#     ether-sqlite-ffm-java21-runtime:{version} → thin + fat JAR (Java 21 preview FFM)
+#     ether-sqlite-jni-runtime:{version}       → thin + fat JAR (JNI Java 21)
+#
+#   GraalVM Native Images:
+#     ether-sqlite-ffm-native:{version}-amd64  → ether-sqlite-ffm-linux-amd64.bin
+#     ether-sqlite-ffm-native:{version}-arm64  → ether-sqlite-ffm-linux-arm64.bin
+#     ether-sqlite-jni-native:{version}-amd64  → ether-sqlite-jni-linux-amd64.bin
+#     ether-sqlite-jni-native:{version}-arm64  → ether-sqlite-jni-linux-arm64.bin
+#
+# Grafo de jobs:
+#
+#   build-rust-ffm (amd64, arm64)  ──→  build-native-ffm (amd64, arm64)
+#   build-rust-jni (amd64, arm64)  ──→  build-native-jni (amd64, arm64)
+#   build-java-fat    (paralelo)
+#   build-java-fat-ffm21 (paralelo)
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Publish
+
+on:
+  push:
+    tags:
+      - 'v[0-9]*.[0-9]*.[0-9]*'
+
+permissions:
+  packages: write
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  GLIBC_MIN: "2.17"
+  REGISTRY: ghcr.io
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+
+  # ── Rust FFM .so (amd64 + arm64) ─────────────────────────────────────────────
+  build-rust-ffm:
+    name: "🦀 Rust FFM .so (${{ matrix.arch }})"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+            zig_arch: x86_64
+            lib_src: libether_sqlite_ffm_runtime.so
+            lib_dst: libether_sqlite_ffm_runtime-linux-amd64.so
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            zig_arch: aarch64
+            lib_src: libether_sqlite_ffm_runtime.so
+            lib_dst: libether_sqlite_ffm_runtime-linux-arm64.so
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ matrix.runner }}-cargo-ffm-${{ hashFiles('sources/rust/Cargo.lock') }}
+          restore-keys: ${{ matrix.runner }}-cargo-ffm-
+
+      - name: Install Zig (${{ matrix.zig_arch }})
+        run: |
+          ZIG_VERSION=0.13.0
+          curl -fsSL \
+            "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${{ matrix.zig_arch }}-${ZIG_VERSION}.tar.xz" \
+            -o /tmp/zig.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C /tmp
+          echo "/tmp/zig-linux-${{ matrix.zig_arch }}-${ZIG_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild --locked
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Build libether_sqlite_ffm_runtime.so (glibc ${{ env.GLIBC_MIN }}+)
+        working-directory: sources/rust
+        run: cargo zigbuild -p ether-sqlite-ffm --release --target "${{ matrix.rust_target }}.${{ env.GLIBC_MIN }}"
+
+      - name: Collect .so
+        run: |
+          mkdir -p dist
+          cp "sources/rust/target/${{ matrix.rust_target }}/release/${{ matrix.lib_src }}" \
+             "dist/${{ matrix.lib_dst }}"
+
+      - name: Setup ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Push FFM .so to GHCR
+        working-directory: dist
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-ffm:${VERSION}-${{ matrix.arch }}"
+          oras push "$IMAGE" "${{ matrix.lib_dst }}:application/octet-stream"
+          echo "Publicado: ${IMAGE}"
+
+      - name: Upload artifact (para build-native-ffm del mismo run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: pub-ffm-lib-${{ matrix.arch }}
+          path: dist/${{ matrix.lib_dst }}
+          retention-days: 1
+
+  # ── Rust JNI .so (amd64 + arm64) ─────────────────────────────────────────────
+  build-rust-jni:
+    name: "🦀 Rust JNI .so (${{ matrix.arch }})"
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            rust_target: x86_64-unknown-linux-gnu
+            zig_arch: x86_64
+            lib_src: libether_sqlite_jni_runtime.so
+            lib_dst: libether_sqlite_jni_runtime-linux-amd64.so
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            rust_target: aarch64-unknown-linux-gnu
+            zig_arch: aarch64
+            lib_src: libether_sqlite_jni_runtime.so
+            lib_dst: libether_sqlite_jni_runtime-linux-arm64.so
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+          key: ${{ matrix.runner }}-cargo-jni-${{ hashFiles('sources/rust/Cargo.lock') }}
+          restore-keys: ${{ matrix.runner }}-cargo-jni-
+
+      - name: Install Zig (${{ matrix.zig_arch }})
+        run: |
+          ZIG_VERSION=0.13.0
+          curl -fsSL \
+            "https://ziglang.org/download/${ZIG_VERSION}/zig-linux-${{ matrix.zig_arch }}-${ZIG_VERSION}.tar.xz" \
+            -o /tmp/zig.tar.xz
+          tar -xJf /tmp/zig.tar.xz -C /tmp
+          echo "/tmp/zig-linux-${{ matrix.zig_arch }}-${ZIG_VERSION}" >> "$GITHUB_PATH"
+
+      - name: Install cargo-zigbuild
+        run: cargo install cargo-zigbuild --locked
+
+      - name: Add Rust target
+        run: rustup target add ${{ matrix.rust_target }}
+
+      - name: Build libether_sqlite_jni_runtime.so (glibc ${{ env.GLIBC_MIN }}+)
+        working-directory: sources/rust
+        run: cargo zigbuild -p ether-sqlite-jni --release --target "${{ matrix.rust_target }}.${{ env.GLIBC_MIN }}"
+
+      - name: Collect .so
+        run: |
+          mkdir -p dist
+          cp "sources/rust/target/${{ matrix.rust_target }}/release/${{ matrix.lib_src }}" \
+             "dist/${{ matrix.lib_dst }}"
+
+      - name: Setup ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Push JNI .so to GHCR
+        working-directory: dist
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-jni:${VERSION}-${{ matrix.arch }}"
+          oras push "$IMAGE" "${{ matrix.lib_dst }}:application/octet-stream"
+          echo "Publicado: ${IMAGE}"
+
+      - name: Upload artifact (para build-native-jni del mismo run)
+        uses: actions/upload-artifact@v4
+        with:
+          name: pub-jni-lib-${{ matrix.arch }}
+          path: dist/${{ matrix.lib_dst }}
+          retention-days: 1
+
+  # ── Java Fat JARs — FFM Java 25 + JNI Java 21 ────────────────────────────────
+  # GraalVM 25 compila ambos módulos (JNI usa --release 21 en su pom.xml).
+  # No necesita la .so: tests deshabilitados (-DskipTests).
+  build-java-fat:
+    name: "☕ Java Fat JARs (FFM25 + JNI)"
+    runs-on: ubuntu-latest
+    env:
+      MAVEN_REPO: ${{ github.workspace }}/.m2-local
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup GraalVM JDK 25
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.m2-local
+          key: ${{ runner.os }}-maven-fat-${{ hashFiles('sources/java/ether-sqlite-core/pom.xml', 'sources/java/ether-sqlite-ffm-runtime/pom.xml', 'sources/java/ether-sqlite-jni-runtime/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-fat-
+
+      - name: Set release version en pom.xml (runtime modules solamente)
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          # ether-sqlite-core NO se versiona: es dependencia interna no publicada.
+          ./mvnw versions:set -f sources/java/ether-sqlite-ffm-runtime/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+          ./mvnw versions:set -f sources/java/ether-sqlite-jni-runtime/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+
+      - name: Build + install ether-sqlite-core
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
+
+      - name: Build ether-sqlite-ffm-runtime (thin + fat)
+        working-directory: sources/java/ether-sqlite-ffm-runtime
+        run: ./mvnw package -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
+
+      - name: Build ether-sqlite-jni-runtime (thin + fat)
+        working-directory: sources/java/ether-sqlite-jni-runtime
+        run: ./mvnw package -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          cp "sources/java/ether-sqlite-ffm-runtime/target/ether-sqlite-ffm-runtime-${VERSION}.jar" \
+             "dist/ether-sqlite-ffm-runtime-${VERSION}.jar"
+          cp "sources/java/ether-sqlite-ffm-runtime/target/ether-sqlite-ffm-runtime-${VERSION}-fat.jar" \
+             "dist/ether-sqlite-ffm-runtime-${VERSION}-fat.jar"
+          cp "sources/java/ether-sqlite-jni-runtime/target/ether-sqlite-jni-runtime-${VERSION}.jar" \
+             "dist/ether-sqlite-jni-runtime-${VERSION}.jar"
+          cp "sources/java/ether-sqlite-jni-runtime/target/ether-sqlite-jni-runtime-${VERSION}-fat.jar" \
+             "dist/ether-sqlite-jni-runtime-${VERSION}-fat.jar"
+
+      - name: Setup ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Push ether-sqlite-ffm-runtime JARs a GHCR
+        working-directory: dist
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-ffm-runtime:${VERSION}"
+          oras push "${IMAGE}" \
+            "ether-sqlite-ffm-runtime-${VERSION}.jar:application/java-archive" \
+            "ether-sqlite-ffm-runtime-${VERSION}-fat.jar:application/java-archive"
+          echo "Publicado: ${IMAGE}"
+
+      - name: Push ether-sqlite-jni-runtime JARs a GHCR
+        working-directory: dist
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-jni-runtime:${VERSION}"
+          oras push "${IMAGE}" \
+            "ether-sqlite-jni-runtime-${VERSION}.jar:application/java-archive" \
+            "ether-sqlite-jni-runtime-${VERSION}-fat.jar:application/java-archive"
+          echo "Publicado: ${IMAGE}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pub-java-fat-ffm25-jni
+          path: dist/
+          retention-days: 7
+
+  # ── Java Fat JARs — FFM Java 21 preview ──────────────────────────────────────
+  # Requiere JDK 21 por --enable-preview (bytecode 65.65535).
+  # NO genera native-image (preview bytecode bloquea GraalVM).
+  build-java-fat-ffm21:
+    name: "☕ Java Fat JARs (FFM21 preview)"
+    runs-on: ubuntu-latest
+    env:
+      MAVEN_REPO: ${{ github.workspace }}/.m2-local
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup GraalVM JDK 21
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '21'
+          distribution: 'graalvm'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.m2-local
+          key: ${{ runner.os }}-maven-fat-ffm21-${{ hashFiles('sources/java/ether-sqlite-core/pom.xml', 'sources/java/ether-sqlite-ffm-java21-runtime/pom.xml') }}
+          restore-keys: ${{ runner.os }}-maven-fat-ffm21-
+
+      - name: Set release version en pom.xml
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          ./mvnw versions:set -f sources/java/ether-sqlite-ffm-java21-runtime/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+
+      - name: Build + install ether-sqlite-core
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
+
+      - name: Build ether-sqlite-ffm-java21-runtime (thin + fat)
+        working-directory: sources/java/ether-sqlite-ffm-java21-runtime
+        run: ./mvnw package -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
+
+      - name: Collect artifacts
+        run: |
+          mkdir -p dist
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          cp "sources/java/ether-sqlite-ffm-java21-runtime/target/ether-sqlite-ffm-java21-runtime-${VERSION}.jar" \
+             "dist/ether-sqlite-ffm-java21-runtime-${VERSION}.jar"
+          cp "sources/java/ether-sqlite-ffm-java21-runtime/target/ether-sqlite-ffm-java21-runtime-${VERSION}-fat.jar" \
+             "dist/ether-sqlite-ffm-java21-runtime-${VERSION}-fat.jar"
+
+      - name: Setup ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Push ether-sqlite-ffm-java21-runtime JARs a GHCR
+        working-directory: dist
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-ffm-java21-runtime:${VERSION}"
+          oras push "${IMAGE}" \
+            "ether-sqlite-ffm-java21-runtime-${VERSION}.jar:application/java-archive" \
+            "ether-sqlite-ffm-java21-runtime-${VERSION}-fat.jar:application/java-archive"
+          echo "Publicado: ${IMAGE}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pub-java-fat-ffm21
+          path: dist/
+          retention-days: 7
+
+  # ── GraalVM Native Image FFM Java 25 (amd64 + arm64) ─────────────────────────
+  build-native-ffm:
+    name: "🖥️ Native Image FFM Java 25 (${{ matrix.arch }})"
+    runs-on: ${{ matrix.runner }}
+    needs: [build-rust-ffm]
+    env:
+      MAVEN_REPO: ${{ github.workspace }}/.m2-local
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            lib: libether_sqlite_ffm_runtime-linux-amd64.so
+            binary: ether-sqlite-ffm-linux-amd64.bin
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            lib: libether_sqlite_ffm_runtime-linux-arm64.so
+            binary: ether-sqlite-ffm-linux-arm64.bin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download FFM .so (del mismo run)
+        uses: actions/download-artifact@v4
+        with:
+          name: pub-ffm-lib-${{ matrix.arch }}
+          path: dist
+
+      - name: Setup GraalVM JDK 25 (con native-image)
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          native-image-job-reports: 'true'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.m2-local
+          key: ${{ matrix.runner }}-maven-native-ffm-${{ hashFiles('sources/java/ether-sqlite-core/pom.xml', 'sources/java/ether-sqlite-ffm-runtime/pom.xml') }}
+          restore-keys: ${{ matrix.runner }}-maven-native-ffm-
+
+      - name: Set release version en pom.xml
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          ./mvnw versions:set -f sources/java/ether-sqlite-ffm-runtime/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+
+      - name: Build + install ether-sqlite-core
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
+
+      - name: Build GraalVM Native Image (FFM Java 25)
+        working-directory: sources/java/ether-sqlite-ffm-runtime
+        env:
+          ETHER_SQLITE_LIB: ${{ github.workspace }}/dist/${{ matrix.lib }}
+        run: ./mvnw -Pnative package native:compile -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
+
+      - name: Collect artifact
+        run: |
+          mkdir -p out
+          cp sources/java/ether-sqlite-ffm-runtime/target/ether-sqlite out/${{ matrix.binary }}
+          chmod +x out/${{ matrix.binary }}
+
+      - name: Setup ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Push native binary FFM a GHCR
+        working-directory: out
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-ffm-native:${VERSION}-${{ matrix.arch }}"
+          oras push "${IMAGE}" "${{ matrix.binary }}:application/octet-stream"
+          echo "Publicado: ${IMAGE}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pub-native-ffm-${{ matrix.arch }}
+          path: out/
+          retention-days: 7
+
+  # ── GraalVM Native Image JNI Java 21 (amd64 + arm64) ─────────────────────────
+  build-native-jni:
+    name: "🖥️ Native Image JNI Java 21 (${{ matrix.arch }})"
+    runs-on: ${{ matrix.runner }}
+    needs: [build-rust-jni]
+    env:
+      MAVEN_REPO: ${{ github.workspace }}/.m2-local
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+            lib: libether_sqlite_jni_runtime-linux-amd64.so
+            binary: ether-sqlite-jni-linux-amd64.bin
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+            lib: libether_sqlite_jni_runtime-linux-arm64.so
+            binary: ether-sqlite-jni-linux-arm64.bin
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download JNI .so (del mismo run)
+        uses: actions/download-artifact@v4
+        with:
+          name: pub-jni-lib-${{ matrix.arch }}
+          path: dist
+
+      - name: Setup GraalVM JDK 25 (con native-image)
+        uses: graalvm/setup-graalvm@v1
+        with:
+          java-version: '25'
+          distribution: 'graalvm'
+          native-image-job-reports: 'true'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Cache Maven repository
+        uses: actions/cache@v4
+        with:
+          path: ${{ github.workspace }}/.m2-local
+          key: ${{ matrix.runner }}-maven-native-jni-${{ hashFiles('sources/java/ether-sqlite-core/pom.xml', 'sources/java/ether-sqlite-jni-runtime/pom.xml') }}
+          restore-keys: ${{ matrix.runner }}-maven-native-jni-
+
+      - name: Set release version en pom.xml
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          ./mvnw versions:set -f sources/java/ether-sqlite-jni-runtime/pom.xml \
+            -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
+
+      - name: Build + install ether-sqlite-core
+        run: ./mvnw install -f sources/java/ether-sqlite-core/pom.xml -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
+
+      - name: Build GraalVM Native Image (JNI Java 21)
+        working-directory: sources/java/ether-sqlite-jni-runtime
+        env:
+          ETHER_SQLITE_JNI_LIB: ${{ github.workspace }}/dist/${{ matrix.lib }}
+        run: ./mvnw -Pnative package native:compile -Dmaven.repo.local="${MAVEN_REPO}" -DskipTests --no-transfer-progress
+
+      - name: Collect artifact
+        run: |
+          mkdir -p out
+          cp sources/java/ether-sqlite-jni-runtime/target/ether-sqlite-jni out/${{ matrix.binary }}
+          chmod +x out/${{ matrix.binary }}
+
+      - name: Setup ORAS
+        uses: oras-project/setup-oras@v1
+
+      - name: Login to GHCR
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | oras login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
+
+      - name: Push native binary JNI a GHCR
+        working-directory: out
+        run: |
+          VERSION="${{ github.ref_name }}"
+          VERSION="${VERSION#v}"
+          IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-jni-native:${VERSION}-${{ matrix.arch }}"
+          oras push "${IMAGE}" "${{ matrix.binary }}:application/octet-stream"
+          echo "Publicado: ${IMAGE}"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pub-native-jni-${{ matrix.arch }}
+          path: out/
+          retention-days: 7

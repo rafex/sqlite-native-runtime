@@ -27,13 +27,16 @@ CARGO_TOOLCHAIN="${CARGO_TOOLCHAIN:-${SNR_CARGO_TOOLCHAIN}}"
 CONTAINER_ENGINE="${CONTAINER_ENGINE:-podman}"
 GLIBC_MIN="${GLIBC_MIN:-2.17}"
 
-# ── Versiones de librerías nativas (desde VERSIONS en la raíz del repo) ───────
+# ── Versiones de artefactos publicados (desde VERSIONS en la raíz del repo) ───
+# Formato: RUST=v1.0.0  JAVA_FAT=v1.0.0  JAVA_NATIVE=v1.0.0
 # Las variables de entorno tienen prioridad sobre el archivo (permiten override).
 if [[ -f "${ROOT}/VERSIONS" ]]; then
-  _FFM_FILE="$(grep '^FFM_VERSION=' "${ROOT}/VERSIONS" | cut -d= -f2 | tr -d '[:space:]')"
-  _JNI_FILE="$(grep '^JNI_VERSION=' "${ROOT}/VERSIONS" | cut -d= -f2 | tr -d '[:space:]')"
-  FFM_VERSION="${FFM_VERSION:-${_FFM_FILE}}"
-  JNI_VERSION="${JNI_VERSION:-${_JNI_FILE}}"
+  _RUST_FILE="$(grep '^RUST=' "${ROOT}/VERSIONS" | cut -d= -f2 | tr -d '[:space:]')"
+  _FAT_FILE="$(grep '^JAVA_FAT=' "${ROOT}/VERSIONS" | cut -d= -f2 | tr -d '[:space:]')"
+  _NAT_FILE="$(grep '^JAVA_NATIVE=' "${ROOT}/VERSIONS" | cut -d= -f2 | tr -d '[:space:]')"
+  RUST_VERSION="${RUST_VERSION:-${_RUST_FILE}}"
+  JAVA_FAT_VERSION="${JAVA_FAT_VERSION:-${_FAT_FILE}}"
+  JAVA_NATIVE_VERSION="${JAVA_NATIVE_VERSION:-${_NAT_FILE}}"
 fi
 
 # ── Rutas derivadas ───────────────────────────────────────────────────────────
@@ -57,4 +60,4 @@ export GRAALVM_HOME CARGO_TOOLCHAIN CONTAINER_ENGINE GLIBC_MIN
 export JAVA_DIR RUST_DIR CONTAINERS_DIR
 export CARGO RUSTC CARGO_BIN
 export ETHER_SQLITE_FFM_LIB ETHER_SQLITE_JNI_LIB ETHER_SQLITE_LIB
-export FFM_VERSION JNI_VERSION
+export RUST_VERSION JAVA_FAT_VERSION JAVA_NATIVE_VERSION

@@ -1,17 +1,24 @@
-# VERSIONS — Versiones activas de las librerías nativas Rust publicadas en GHCR.
+# VERSIONS — Versiones de los artefactos publicados en GitHub Packages (GHCR).
 #
-# Actualiza estos valores antes de lanzar un release:
-#   1. Edita FFM_VERSION y/o JNI_VERSION
-#   2. Publica las librerías:  just rust-publish
-#   3. Lanza el release:       just release-dispatch v0.X.Y
+# Flujo de uso:
+#   1. Haz push del tag de release:   just tag-push
+#      → Flujo 2 (publish.yml) compila todo y publica en GHCR.
+#   2. Edita este archivo con las versiones deseadas para el release.
+#   3. Lanza el release:              just release <tag>
+#      → Flujo 3 (release.yml) descarga de GHCR y crea el GitHub Release.
 #
-# Usado por:
-#   - release.yml           (prepare job → determinar versiones)
-#   - just rust-publish     (build-rust.yml workflow_dispatch)
-#   - just release-dispatch (release.yml workflow_dispatch)
+# RUST        = tag del que provienen las librerías Rust (.so) en GHCR.
+#               Puede ser un tag v* (publicado por publish.yml) o
+#               un tag independiente (publicado por build-rust.yml manual).
 #
-# Formato: KEY=VALUE sin espacios, sin comillas.
-# Compatible con `source VERSIONS` en bash y con `grep/cut` en CI.
+# JAVA_FAT    = tag del que provienen los JARs thin+fat en GHCR.
+#               Normalmente coincide con el tag del release Java.
+#
+# JAVA_NATIVE = tag del que provienen los binarios GraalVM native en GHCR.
+#               Normalmente coincide con JAVA_FAT.
+#
+# Formato: KEY=vMAJOR.MINOR.PATCH  (con prefijo 'v', sin espacios ni comillas)
 
-FFM_VERSION=0.1.0
-JNI_VERSION=0.1.0
+RUST=v0.3.6
+JAVA_FAT=v0.3.6
+JAVA_NATIVE=v0.3.6

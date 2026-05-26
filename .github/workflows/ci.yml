@@ -1,9 +1,10 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# ci.yml — Integración continua
+# ci.yml — Flujo 1: Validación en main
 #
 # Dispara en:
-#   • push a main  (validar que main siempre está verde)
-#   • pull_request (validar antes de integrar)
+#   • push a main  CON cambios en sources/
+#
+# Solo compila y ejecuta tests. Nunca publica paquetes ni crea releases.
 #
 # Inventario de proyectos
 # ───────────────────────
@@ -18,7 +19,7 @@
 #     6. ether-sqlite-ffm-java21-runtime Java 21 preview FFM — 5 clases de test
 #     7. ether-sqlite-jni-runtime     Java 21 JNI real    — 5 clases de test
 #
-# Jobs (6) y dependencias:
+# Jobs (7) y dependencias:
 #
 #   [1] rust-core  ──────────────────────────────────── (paralelo, sin deps)
 #   [2] rust-ffm   ──→  [5] java-ffm-runtime            (artifact .so FFM)
@@ -38,19 +39,6 @@ on:
     branches: [main]
     paths:
       - 'sources/**'
-      - 'containers/**'
-      - 'scripts/**'
-      - 'Makefile'
-      - 'Justfile'
-      - '.github/workflows/ci.yml'
-  pull_request:
-    paths:
-      - 'sources/**'
-      - 'containers/**'
-      - 'scripts/**'
-      - 'Makefile'
-      - 'Justfile'
-      - '.github/workflows/ci.yml'
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
