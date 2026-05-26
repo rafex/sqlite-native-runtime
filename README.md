@@ -1,11 +1,18 @@
 # sqlite-native-runtime
 
-Biblioteca SQLite genérica para Java 21 y GraalVM 25 Native Image.  
-**Rust** expone la C ABI completa de SQLite vía `libsqlite3-sys`.  
-**Java** la consume con Panama FFI (`java.lang.foreign.*`, JEP 442 — preview en Java 21) — sin JNI, sin extracción de JARs.
+Biblioteca SQLite para Java con bindings nativos compilados en Rust.
+Ofrece tres mecanismos de integración según la versión de Java y los requisitos de compilación:
 
-> ⚠️ **Requiere Java 21 con `--enable-preview`.** El bytecode usa el flag de preview de Java 21.
-> Java 22+ no es compatible. Ver [Instalación](docs/INSTALL.md#requisitos-previos).
+| Binding | Java | Mecanismo | GraalVM native-image | Flag extra |
+|---|---|---|---|---|
+| **FFM Java 25** | 25+ | Panama FFM estable (JEP 454) | ✅ Soportado | ninguno |
+| **JNI Java 21** | 21+ | JNI clásico | ✅ Soportado | ninguno |
+| **FFM Java 21** | 21 | Panama FFM preview (JEP 442) | ❌ No soportado | `--enable-preview` |
+
+> **Recomendación:** usa **FFM Java 25** si tu JVM es 25+. Usa **JNI Java 21** si necesitas Java 21 y/o GraalVM native-image.
+> FFM Java 21 (preview) es solo para proyectos ya existentes en Java 21 preview — el bytecode con `minor_version=0xFFFF` no es compatible con native-image ni con JVMs 22-24.
+
+---
 
 ## Instalación rápida
 
@@ -13,132 +20,141 @@ Biblioteca SQLite genérica para Java 21 y GraalVM 25 Native Image.
 curl -sS https://raw.githubusercontent.com/rafex/sqlite-native-runtime/main/scripts/release/install.sh | sh
 ```
 
-El script detecta automáticamente la arquitectura (x86\_64 / aarch64) y el modo de instalación (sistema con `sudo` o usuario en `~/.local/lib/`).  
+El script instala la librería nativa (`.so`) en `~/.local/lib/` o `/usr/local/lib/`.
 Para más opciones consulta la [guía de instalación completa](docs/INSTALL.md).
 
-> **Guías**: [Instalación](docs/INSTALL.md) · [Uso y API](docs/USAGE.md)
+---
+
+## Uso rápido
+
+### FFM Java 25
+
+```java
+import mx.rafex.ether.sqlite.FfmSqliteConnection;
+import mx.rafex.ether.sqlite.SqliteConnection;
+import mx.rafex.ether.sqlite.SqliteException;
+
+try (SqliteConnection db = FfmSqliteConnection.open("/data/app.db")) {
+    db.enableWal().busyTimeout(5_000);
+
+    db.exec("CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT)");
+
+    try (var ins = db.prepare("INSERT INTO items(name) VALUES(?)")) {
+        ins.bindText(1, "alfa").stepAndDone();
+    }
+
+    try (var q = db.prepare("SELECT id, name FROM items")) {
+        while (q.step()) {
+            System.out.printf("%d  %s%n", q.columnInt(0), q.columnText(1));
+        }
+    }
+}
+```
+
+### JNI Java 21
+
+```java
+import mx.rafex.ether.sqlite.JniSqliteConnection;
+import mx.rafex.ether.sqlite.SqliteConnection;
+
+try (SqliteConnection db = JniSqliteConnection.open("/data/app.db")) {
+    // API idéntica a FfmSqliteConnection
+    db.enableWal().busyTimeout(5_000);
+    // ...
+}
+```
+
+---
 
 ## Arquitectura
 
 ```
-Java (Panama FFI)
-  SqliteConnection  ←  SqliteStatement  ←  SqliteLibrary
-       ↓
-  libsqlite_native_runtime.{so,dylib}       ← Rust (libsqlite3-sys bundled)
-       ↓
-  SQLite 3.46 (amalgamation compilada dentro del .so)
+Java (SqliteConnection interface — mx.rafex.ether.sqlite)
+  ├─ FfmSqliteConnection   → libether_sqlite_ffm_runtime.so  (Panama FFM, ABI C snr_*)
+  └─ JniSqliteConnection   → libether_sqlite_jni_runtime.so  (JNI Java_mx_rafex_*)
+                                      ↓
+                             ether-sqlite-core (Rust rlib)
+                                      ↓
+                             SQLite (amalgamation bundled via libsqlite3-sys)
 ```
 
-## Estructura
+La librería nativa **no requiere** SQLite instalado en el sistema — SQLite 3 está compilado dentro del `.so`.
+
+---
+
+## Estructura del proyecto
 
 ```
 sqlite-native-runtime/
-  rust/          Crate Rust — C ABI (cdylib + staticlib)
-  java/          Biblioteca Java Maven (Java 21 + --enable-preview, Panama FFI preview — JEP 442)
-    src/main/java/mx/rafex/sqlite/
-      SqliteLibrary.java    — bindings de bajo nivel (MethodHandle por símbolo snr_*)
-      SqliteConnection.java — conexión de alto nivel (AutoCloseable)
-      SqliteStatement.java  — prepared statement (AutoCloseable)
-      SqliteException.java  — excepción runtime
+  sources/
+    rust/
+      ether-sqlite-core/            ← rlib: lógica SQLite + C ABI (snr_*)
+      ether-sqlite-ffm/             ← cdylib: re-exporta core → libether_sqlite_ffm_runtime.so
+      ether-sqlite-jni/             ← cdylib: ABI JNI (Java_*) → libether_sqlite_jni_runtime.so
+    java/
+      ether-sqlite-core/            ← interfaces: SqliteConnection, SqliteStatement, SqliteException
+      ether-sqlite-ffm-runtime/     ← Java 25 FFM estable — FfmSqliteConnection
+      ether-sqlite-ffm-java21-runtime/ ← Java 21 FFM preview — FfmJava21SqliteConnection (JAR only)
+      ether-sqlite-jni-runtime/     ← Java 21 JNI — JniSqliteConnection
 ```
 
-## Build
+---
+
+## Guías
+
+- [Instalación](docs/INSTALL.md) — descargar librería, configurar paths, Maven/Gradle, GraalVM
+- [Uso y API](docs/USAGE.md) — ejemplos completos, transacciones, WAL, virtual threads, native-image
+
+---
+
+## Artefactos del release
+
+Cada [release de GitHub](https://github.com/rafex/sqlite-native-runtime/releases/latest) incluye:
+
+| Archivo | Descripción |
+|---|---|
+| `libether_sqlite_ffm_runtime-linux-amd64.so` | Librería FFM — Linux x86\_64 |
+| `libether_sqlite_ffm_runtime-linux-arm64.so` | Librería FFM — Linux aarch64 |
+| `libether_sqlite_jni_runtime-linux-amd64.so` | Librería JNI — Linux x86\_64 |
+| `libether_sqlite_jni_runtime-linux-arm64.so` | Librería JNI — Linux aarch64 |
+| `ether-sqlite-ffm-runtime-{v}.jar` | JAR thin FFM Java 25 |
+| `ether-sqlite-ffm-runtime-{v}-fat.jar` | JAR fat FFM Java 25 (incluye dependencias) |
+| `ether-sqlite-ffm-java21-runtime-{v}-fat.jar` | JAR fat FFM Java 21 preview |
+| `ether-sqlite-jni-runtime-{v}-fat.jar` | JAR fat JNI Java 21 |
+| `ether-sqlite-ffm-linux-amd64.bin` | Binario nativo FFM — Linux x86\_64 |
+| `ether-sqlite-ffm-linux-arm64.bin` | Binario nativo FFM — Linux aarch64 |
+| `ether-sqlite-jni-linux-amd64.bin` | Binario nativo JNI — Linux x86\_64 |
+| `ether-sqlite-jni-linux-arm64.bin` | Binario nativo JNI — Linux aarch64 |
+| `install.sh` | Script de instalación automática |
+| `*.sha256` | Checksums SHA256 |
+
+---
+
+## Build desde fuente
 
 ### Requisitos
 
-- Rust stable (aarch64-apple-darwin o x86_64-unknown-linux-gnu)
-- GraalVM JDK 25 (incluye `native-image`)
-- **Java 21** (bytecode target 21 + `--enable-preview`; Panama FFM era preview en JEP 442)
-- Maven 3.9+
+| Herramienta | Versión |
+|---|---|
+| Rust | stable |
+| GraalVM JDK 25 | para compilar FFM runtime y native images |
+| JDK 21 | para compilar JNI runtime |
+| Maven | 3.9+ |
+| `cargo-zigbuild` | para cross-compilar con glibc 2.17+ |
 
-```bash
-make build        # compila Rust + Java
-make test         # build + smoke test
-make package      # genera JAR en java/target/
+```sh
+git clone https://github.com/rafex/sqlite-native-runtime.git
+cd sqlite-native-runtime
+
+# Compilar todo (Rust + Java)
+just build
+
+# Solo Rust
+cd sources/rust && cargo build --workspace --release
+
+# Solo Java (FFM runtime)
+./mvnw package -f sources/java/ether-sqlite-ffm-runtime/pom.xml
+
+# Solo Java (JNI runtime)
+./mvnw package -f sources/java/ether-sqlite-jni-runtime/pom.xml
 ```
-
-## Uso
-
-### Dependencia Maven
-
-Descarga el JAR del [último release](https://github.com/rafex/sqlite-native-runtime/releases/latest) e instálalo en tu repositorio local:
-
-```bash
-mvn install:install-file \
-  -Dfile=sqlite-native-runtime-0.1.1.jar \
-  -DgroupId=mx.rafex -DartifactId=sqlite-native-runtime \
-  -Dversion=0.1.1 -Dpackaging=jar
-```
-
-```xml
-<dependency>
-  <groupId>mx.rafex</groupId>
-  <artifactId>sqlite-native-runtime</artifactId>
-  <version>0.1.1</version>
-</dependency>
-```
-
-Panama FFM (preview Java 21) requiere **ambos** flags de JVM:
-
-```
---enable-preview
---enable-native-access=ALL-UNNAMED
-```
-
-### API básica
-
-```java
-try (var db = SqliteConnection.open("/data/app.db")) {
-    db.enableWal().busyTimeout(5000);
-
-    db.exec("CREATE TABLE IF NOT EXISTS items (id INTEGER PRIMARY KEY, name TEXT, val REAL)");
-
-    try (var ins = db.prepare("INSERT INTO items(name, val) VALUES(?, ?)")) {
-        ins.bindText(1, "alfa").bindDouble(2, 1.5).stepAndDone();
-        ins.reset().bindText(1, "beta").bindDouble(2, 2.5).stepAndDone();
-    }
-
-    try (var q = db.prepare("SELECT id, name, val FROM items ORDER BY id")) {
-        while (q.step()) {
-            long id = q.columnInt(0); String name = q.columnText(1); double val = q.columnDouble(2);
-        }
-    }
-
-    db.transaction(() -> db.exec("UPDATE items SET val = val * 2"));
-}
-```
-
-Ver [docs/USAGE.md](docs/USAGE.md) para la guía completa de API (transacciones, savepoints, WAL, virtual threads, GraalVM Native Image).
-
-## GraalVM Native Image
-
-Flags necesarios al construir la imagen nativa del proyecto consumidor:
-
-```
---initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary
---enable-native-access=ALL-UNNAMED
---enable-preview
-```
-
-Para compilar el smoke test como binario nativo (requiere GraalVM 25):
-
-```bash
-make native
-# o con just:
-just native
-```
-
-## Funciones C ABI exportadas (`snr_*`)
-
-| Categoría       | Funciones                                                                              |
-|-----------------|----------------------------------------------------------------------------------------|
-| Conexión        | `snr_open`, `snr_open_memory`, `snr_close`, `snr_ping`, `snr_sqlite_version`          |
-| Exec            | `snr_exec`, `snr_last_insert_rowid`, `snr_changes`, `snr_set_busy_timeout`             |
-| Statements      | `snr_prepare`, `snr_stmt_close`, `snr_stmt_reset`, `snr_stmt_clear_bindings`           |
-| Bind (1-based)  | `snr_bind_null/int/double/text/blob`, `snr_bind_parameter_index`                       |
-| Step            | `snr_step` → 1=ROW, 0=DONE, -1=ERROR                                                  |
-| Column (0-based)| `snr_column_count/type/int/double/text/text_owned/blob/bytes/name`                    |
-| Transacciones   | `snr_begin/begin_immediate/begin_exclusive/commit/rollback`                             |
-| Savepoints      | `snr_savepoint/release/rollback_to`                                                    |
-| WAL             | `snr_wal_checkpoint`, `snr_wal_autocheckpoint`                                         |
-| Errores         | `snr_last_error` (puntero interno, no usar con Loom), `snr_last_error_copy` (copia heap, segura con virtual threads), `snr_free_string` (libera char*) |

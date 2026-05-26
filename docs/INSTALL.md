@@ -1,57 +1,19 @@
 # Instalación — sqlite-native-runtime
 
-## Requisitos previos
+## Elegir el binding adecuado
 
-| Requisito | Versión | Notas |
-|---|---|---|
-| **Java** | **21 exactamente** | Panama FFM era Preview en Java 21 (JEP 442). **Requiere `--enable-preview`**. |
-| **OS** | Linux x86\_64 / arm64 **64-bit** | Binarios pre-compilados disponibles. macOS: compilar desde fuente. |
-| `curl` o `wget` | cualquiera | Necesario para el script de instalación. |
+| Binding | Java | GraalVM native-image | JVM flags extra | Librería nativa |
+|---|---|---|---|---|
+| **FFM Java 25** | 25+ | ✅ Sí | ninguno | `libether_sqlite_ffm_runtime.so` |
+| **JNI Java 21** | 21+ | ✅ Sí | ninguno | `libether_sqlite_jni_runtime.so` |
+| **FFM Java 21** | 21 exactamente | ❌ No | `--enable-preview --enable-native-access=ALL-UNNAMED` | `libether_sqlite_ffm_runtime.so` |
 
-> ⚠️ **Java 22+ no es compatible.** El bytecode incluye el flag de preview de Java 21
-> (`minor_version=0xFFFF`). Las JVMs de Java 22, 23, 24 y 25 lo rechazarán con
-> `UnsupportedClassVersionError`. Esta limitación se eliminará en una versión futura
-> con soporte JNI.
-
-> ⚠️ **`--enable-preview` es obligatorio en runtime.** Toda aplicación que use esta
-> librería debe arrancarse con el flag `--enable-preview`.
-
-La librería nativa **no requiere** SQLite instalado en el sistema — SQLite 3 está compilado dentro del `.so` (amalgamation bundled via `libsqlite3-sys`).
+> La librería nativa **no requiere** SQLite instalado en el sistema — SQLite 3 está compilado
+> dentro del `.so` (amalgamation bundled via `libsqlite3-sys`).
 
 ---
 
-## Soporte Raspberry Pi
-
-| Modelo | CPU | OS 64-bit (aarch64) | OS 32-bit (armhf) |
-|---|---|---|---|
-| Raspberry Pi 3B | Cortex-A53 (ARMv8.0) | ✅ Soportado | ❌ No soportado |
-| Raspberry Pi 4B | Cortex-A72 (ARMv8.2) | ✅ Soportado | ❌ No soportado |
-
-**¿Por qué no se soporta arm32 (OS 32-bit)?**  
-Java 22+ (requerido por Panama FFM / JEP 454) **no publica builds para arm32**. Los distribuidores principales (Eclipse Temurin, Azul Zulu, GraalVM) abandonaron arm32 a partir de Java 22. Sin JDK no hay forma de cargar la librería nativa.
-
-**Raspberry Pi 3B y 4B con OS 64-bit funcionan sin configuración adicional:**
-
-```sh
-# 1. Instalar un OS 64-bit en tu Raspberry Pi:
-#    Raspberry Pi OS 64-bit  → https://www.raspberrypi.com/software/
-#    Ubuntu Server 24.04 LTS → https://ubuntu.com/download/raspberry-pi
-
-# 2. Instalar la librería (detecta aarch64 automáticamente):
-curl -sS https://raw.githubusercontent.com/rafex/sqlite-native-runtime/main/scripts/release/install.sh | sh
-
-# 3. Ejecutar tu aplicación:
-java --enable-preview --enable-native-access=ALL-UNNAMED -jar mi-app.jar
-```
-
-> Si ejecutas `install.sh` en un OS 32-bit recibirás un mensaje de error claro  
-> con instrucciones para migrar a 64-bit.
-
----
-
-## Instalación rápida (recomendado)
-
-> ⚠️ **Requisito:** Java 21 con `--enable-preview`. Ver [Requisitos previos](#requisitos-previos).
+## Instalación rápida (recomendada)
 
 ```sh
 curl -sS https://raw.githubusercontent.com/rafex/sqlite-native-runtime/main/scripts/release/install.sh | sh
@@ -59,160 +21,219 @@ curl -sS https://raw.githubusercontent.com/rafex/sqlite-native-runtime/main/scri
 
 El script:
 1. Detecta OS y arquitectura (`x86_64` / `aarch64`)
-2. Consulta la última versión en la API de GitHub
-3. Descarga `libsqlite_native_runtime-linux-{arch}.so` del release
-4. Verifica el SHA256
-5. Instala la librería:
+2. Descarga la última versión de GitHub Releases
+3. Verifica el SHA256
+4. Instala **ambas** librerías (FFM + JNI):
 
-| Condición | Destino | Auto-detectado por la JVM |
-|---|---|---|
-| `sudo` disponible | `/usr/local/lib/libsqlite_native_runtime.so` | ✅ sí |
-| Sin `sudo` | `~/.local/lib/libsqlite_native_runtime.so` | ✅ sí (≥ v0.1.1) |
-
-Si se instala sin `sudo`, el script también añade `export SNR_LIB=...` a `~/.bashrc` / `~/.zshrc` para compatibilidad con versiones anteriores.
+| Condición | Destino |
+|---|---|
+| `sudo` disponible | `/usr/local/lib/` |
+| Sin `sudo` | `~/.local/lib/` |
 
 ### Opciones del script
 
 ```sh
-# Instalar una versión específica
-SNR_VERSION=v0.1.1 curl -sS ...install.sh | sh
+# Versión específica
+SNR_VERSION=v0.4.0 curl -sS .../install.sh | sh
 
-# Forzar instalación en directorio de usuario (aunque sudo esté disponible)
-SNR_USER_INSTALL=1 curl -sS ...install.sh | sh
+# Forzar instalación en directorio de usuario
+SNR_USER_INSTALL=1 curl -sS .../install.sh | sh
 ```
 
 ---
 
-## Instalación manual
+## Instalación manual de la librería nativa
 
-### Descargar desde GitHub Releases
+### 1. Descargar desde GitHub Releases
 
-Ve a [Releases](https://github.com/rafex/sqlite-native-runtime/releases) y descarga el artefacto para tu arquitectura:
+Ve a [Releases](https://github.com/rafex/sqlite-native-runtime/releases/latest) y descarga el
+artefacto para tu binding y arquitectura:
 
-| Archivo | Arquitectura |
-|---|---|
-| `libsqlite_native_runtime-linux-amd64.so` | Linux x86\_64 |
-| `libsqlite_native_runtime-linux-arm64.so` | Linux aarch64 |
+| Archivo | Binding | Arquitectura |
+|---|---|---|
+| `libether_sqlite_ffm_runtime-linux-amd64.so` | FFM (Java 25 / Java 21) | Linux x86\_64 |
+| `libether_sqlite_ffm_runtime-linux-arm64.so` | FFM (Java 25 / Java 21) | Linux aarch64 |
+| `libether_sqlite_jni_runtime-linux-amd64.so` | JNI (Java 21) | Linux x86\_64 |
+| `libether_sqlite_jni_runtime-linux-arm64.so` | JNI (Java 21) | Linux aarch64 |
 
 Verifica el SHA256:
 
 ```sh
-sha256sum -c libsqlite_native_runtime-linux-amd64.so.sha256
+sha256sum -c libether_sqlite_ffm_runtime-linux-amd64.so.sha256
+sha256sum -c libether_sqlite_jni_runtime-linux-amd64.so.sha256
 ```
 
-### Instalar en el sistema (con sudo)
+### 2. Instalar en el sistema (con sudo)
 
 ```sh
-sudo cp libsqlite_native_runtime-linux-amd64.so /usr/local/lib/libsqlite_native_runtime.so
-sudo chmod 755 /usr/local/lib/libsqlite_native_runtime.so
+# FFM
+sudo cp libether_sqlite_ffm_runtime-linux-amd64.so /usr/local/lib/libether_sqlite_ffm_runtime.so
+sudo chmod 755 /usr/local/lib/libether_sqlite_ffm_runtime.so
+
+# JNI
+sudo cp libether_sqlite_jni_runtime-linux-amd64.so /usr/local/lib/libether_sqlite_jni_runtime.so
+sudo chmod 755 /usr/local/lib/libether_sqlite_jni_runtime.so
+
 sudo ldconfig
 ```
 
-La JVM detecta automáticamente `/usr/local/lib/` — no necesitas configurar nada más.
-
-### Instalar como usuario (sin sudo)
+### 3. Instalar como usuario (sin sudo)
 
 ```sh
 mkdir -p ~/.local/lib
-cp libsqlite_native_runtime-linux-amd64.so ~/.local/lib/libsqlite_native_runtime.so
-chmod 755 ~/.local/lib/libsqlite_native_runtime.so
-```
 
-La JVM detecta automáticamente `~/.local/lib/` desde la versión **v0.1.1**.  
-Para versiones anteriores, o para ser explícito, añade a tu shell:
+# FFM
+cp libether_sqlite_ffm_runtime-linux-amd64.so ~/.local/lib/libether_sqlite_ffm_runtime.so
+chmod 755 ~/.local/lib/libether_sqlite_ffm_runtime.so
 
-```sh
-export SNR_LIB="$HOME/.local/lib/libsqlite_native_runtime.so"
+# JNI
+cp libether_sqlite_jni_runtime-linux-amd64.so ~/.local/lib/libether_sqlite_jni_runtime.so
+chmod 755 ~/.local/lib/libether_sqlite_jni_runtime.so
 ```
 
 ---
 
 ## Rutas de búsqueda de la librería
 
-La JVM busca la librería en este orden:
+### FFM (`libether_sqlite_ffm_runtime`)
 
-| Prioridad | Ruta / Mecanismo |
+La librería se busca en este orden:
+
+| Prioridad | Mecanismo |
 |---|---|
-| 1 | Propiedad de sistema: `-Dsnr.lib=/ruta/completa.so` |
-| 2 | Variable de entorno: `SNR_LIB=/ruta/completa.so` |
-| 3 | `~/.local/lib/libsqlite_native_runtime.so` *(instalación usuario)* |
-| 4 | `/usr/local/lib/libsqlite_native_runtime.so` *(instalación sistema Linux)* |
-| 5 | `/opt/snr/lib/libsqlite_native_runtime.so` |
-| 6 | `/usr/local/lib/libsqlite_native_runtime.dylib` *(macOS sistema)* |
-| 7 | `/opt/homebrew/lib/libsqlite_native_runtime.dylib` *(Homebrew macOS)* |
-| 8 | Directorio de trabajo *(solo desarrollo, imprime aviso)* |
+| 1 | Propiedad de sistema: `-Dether.sqlite.lib=/ruta/completa.so` |
+| 2 | Variable de entorno: `ETHER_SQLITE_LIB=/ruta/completa.so` |
+| 3 | `~/.local/lib/libether_sqlite_ffm_runtime.{dylib,so}` |
+| 4 | `/usr/local/lib/libether_sqlite_ffm_runtime.{dylib,so}` |
+| 5 | `/opt/snr/lib/libether_sqlite_ffm_runtime.{dylib,so}` |
+| 6 | `/opt/homebrew/lib/libether_sqlite_ffm_runtime.{dylib,so}` |
+| 7 | Directorio de trabajo *(solo desarrollo, imprime aviso)* |
+
+### JNI (`libether_sqlite_jni_runtime`)
+
+| Prioridad | Mecanismo |
+|---|---|
+| 1 | Propiedad de sistema: `-Dether.sqlite.jni.lib=/ruta/completa.so` |
+| 2 | Variable de entorno: `ETHER_SQLITE_JNI_LIB=/ruta/completa.so` |
+| 3 | `~/.local/lib/libether_sqlite_jni_runtime.{dylib,so}` |
+| 4 | `/usr/local/lib/libether_sqlite_jni_runtime.{dylib,so}` |
+| 5 | `/opt/snr/lib/libether_sqlite_jni_runtime.{dylib,so}` |
+| 6 | `/opt/homebrew/lib/libether_sqlite_jni_runtime.{dylib,so}` |
+| 7 | Directorio de trabajo *(solo desarrollo, imprime aviso)* |
 
 ---
 
-## macOS — Compilar desde fuente
+## Integración Maven
 
-Los binarios pre-compilados en los releases son solo para Linux. En macOS compila localmente:
+### Paso 1 — Instalar el JAR en el repositorio local
 
-```sh
-# Requisitos: Rust stable, GraalVM JDK 25
-git clone https://github.com/rafex/sqlite-native-runtime.git
-cd sqlite-native-runtime
-make build-rust
-# Librería: sources/rust/ether-sqlite/target/release/libether_sqlite_runtime.dylib
-```
-
-Instala con:
-```sh
-sudo cp sources/rust/ether-sqlite/target/release/libether_sqlite_runtime.dylib \
-        /usr/local/lib/
-```
-
-O con Homebrew prefix:
-```sh
-cp sources/rust/ether-sqlite/target/release/libether_sqlite_runtime.dylib \
-   /opt/homebrew/lib/
-```
-
----
-
-## Integración con Maven / Gradle
-
-### Instalar el JAR en el repositorio local
+Descarga el fat JAR del binding que necesites desde [GitHub Releases](https://github.com/rafex/sqlite-native-runtime/releases/latest):
 
 ```sh
-# Descarga ether-sqlite-runtime-{version}.jar del release y:
+# FFM Java 25
 mvn install:install-file \
-  -Dfile=ether-sqlite-runtime-0.1.1.jar \
-  -DgroupId=mx.rafex \
-  -DartifactId=ether-sqlite-runtime \
-  -Dversion=0.1.1 \
+  -Dfile=ether-sqlite-ffm-runtime-{version}-fat.jar \
+  -DgroupId=mx.rafex.ether \
+  -DartifactId=ether-sqlite-ffm-runtime \
+  -Dversion={version} \
+  -Dpackaging=jar
+
+# JNI Java 21
+mvn install:install-file \
+  -Dfile=ether-sqlite-jni-runtime-{version}-fat.jar \
+  -DgroupId=mx.rafex.ether \
+  -DartifactId=ether-sqlite-jni-runtime \
+  -Dversion={version} \
+  -Dpackaging=jar
+
+# FFM Java 21 preview
+mvn install:install-file \
+  -Dfile=ether-sqlite-ffm-java21-runtime-{version}-fat.jar \
+  -DgroupId=mx.rafex.ether \
+  -DartifactId=ether-sqlite-ffm-java21-runtime \
+  -Dversion={version} \
   -Dpackaging=jar
 ```
 
-### `pom.xml`
+### Paso 2 — `pom.xml`
+
+#### FFM Java 25 (recomendado para Java 25+)
 
 ```xml
-<dependency>
-  <groupId>mx.rafex</groupId>
-  <artifactId>ether-sqlite-runtime</artifactId>
-  <version>0.1.1</version>
-</dependency>
+<properties>
+  <maven.compiler.release>25</maven.compiler.release>
+</properties>
+
+<dependencies>
+  <dependency>
+    <groupId>mx.rafex.ether</groupId>
+    <artifactId>ether-sqlite-ffm-runtime</artifactId>
+    <version>{version}</version>
+  </dependency>
+</dependencies>
 ```
 
-### `build.gradle` / `build.gradle.kts`
+Surefire (tests):
 
-```kotlin
-dependencies {
-    implementation("mx.rafex.ether:ether-sqlite-runtime:0.1.1")
-}
+```xml
+<plugin>
+  <artifactId>maven-surefire-plugin</artifactId>
+  <configuration>
+    <argLine>--enable-native-access=ALL-UNNAMED</argLine>
+    <environmentVariables>
+      <ETHER_SQLITE_LIB>/ruta/a/libether_sqlite_ffm_runtime.so</ETHER_SQLITE_LIB>
+    </environmentVariables>
+  </configuration>
+</plugin>
 ```
 
-### Flags de JVM obligatorios
+#### JNI Java 21 (recomendado para Java 21+)
 
-Esta librería usa Panama FFM en modo **preview de Java 21** (JEP 442).
-**Ambos flags son obligatorios** en cualquier aplicación que la use:
+```xml
+<properties>
+  <maven.compiler.release>21</maven.compiler.release>
+</properties>
 
+<dependencies>
+  <dependency>
+    <groupId>mx.rafex.ether</groupId>
+    <artifactId>ether-sqlite-jni-runtime</artifactId>
+    <version>{version}</version>
+  </dependency>
+</dependencies>
 ```
---enable-preview
---enable-native-access=ALL-UNNAMED
+
+Surefire (tests):
+
+```xml
+<plugin>
+  <artifactId>maven-surefire-plugin</artifactId>
+  <configuration>
+    <environmentVariables>
+      <ETHER_SQLITE_JNI_LIB>/ruta/a/libether_sqlite_jni_runtime.so</ETHER_SQLITE_JNI_LIB>
+    </environmentVariables>
+  </configuration>
+</plugin>
 ```
 
-**Maven Compiler Plugin** (si tu proyecto también compila con Java 21 preview):
+#### FFM Java 21 preview (solo JAR, sin native-image)
+
+```xml
+<properties>
+  <maven.compiler.release>21</maven.compiler.release>
+</properties>
+
+<dependencies>
+  <dependency>
+    <groupId>mx.rafex.ether</groupId>
+    <artifactId>ether-sqlite-ffm-java21-runtime</artifactId>
+    <version>{version}</version>
+  </dependency>
+</dependencies>
+```
+
+Compiler plugin (Java 21 preview):
+
 ```xml
 <plugin>
   <artifactId>maven-compiler-plugin</artifactId>
@@ -225,30 +246,82 @@ Esta librería usa Panama FFM en modo **preview de Java 21** (JEP 442).
 </plugin>
 ```
 
-**Maven Surefire** (tests):
-```xml
-<configuration>
-  <argLine>--enable-preview --enable-native-access=ALL-UNNAMED</argLine>
-</configuration>
-```
+Surefire (tests):
 
-**Spring Boot** (`application.properties`):
-```properties
-spring.jvm.arguments=--enable-preview --enable-native-access=ALL-UNNAMED
-```
-
-**Spring Boot** (Maven, `pom.xml`):
 ```xml
 <plugin>
-  <groupId>org.springframework.boot</groupId>
-  <artifactId>spring-boot-maven-plugin</artifactId>
+  <artifactId>maven-surefire-plugin</artifactId>
   <configuration>
-    <jvmArguments>--enable-preview --enable-native-access=ALL-UNNAMED</jvmArguments>
+    <argLine>--enable-preview --enable-native-access=ALL-UNNAMED</argLine>
+    <environmentVariables>
+      <ETHER_SQLITE_LIB>/ruta/a/libether_sqlite_ffm_runtime.so</ETHER_SQLITE_LIB>
+    </environmentVariables>
   </configuration>
 </plugin>
 ```
 
-**Línea de comandos**:
+---
+
+## Integración Gradle
+
+### FFM Java 25
+
+```kotlin
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(25) }
+}
+
+dependencies {
+    implementation("mx.rafex.ether:ether-sqlite-ffm-runtime:{version}")
+}
+
+tasks.test {
+    jvmArgs("--enable-native-access=ALL-UNNAMED")
+    environment("ETHER_SQLITE_LIB", "/ruta/a/libether_sqlite_ffm_runtime.so")
+}
+```
+
+### JNI Java 21
+
+```kotlin
+java {
+    toolchain { languageVersion = JavaLanguageVersion.of(21) }
+}
+
+dependencies {
+    implementation("mx.rafex.ether:ether-sqlite-jni-runtime:{version}")
+}
+
+tasks.test {
+    environment("ETHER_SQLITE_JNI_LIB", "/ruta/a/libether_sqlite_jni_runtime.so")
+}
+```
+
+---
+
+## Línea de comandos (runtime)
+
+### FFM Java 25
+
+```sh
+java --enable-native-access=ALL-UNNAMED -jar mi-app.jar
+# o con ruta explícita a la librería:
+java -Dether.sqlite.lib=/usr/local/lib/libether_sqlite_ffm_runtime.so \
+     --enable-native-access=ALL-UNNAMED \
+     -jar mi-app.jar
+```
+
+### JNI Java 21
+
+```sh
+java -jar mi-app.jar
+# o con ruta explícita:
+java -Dether.sqlite.jni.lib=/usr/local/lib/libether_sqlite_jni_runtime.so \
+     -jar mi-app.jar
+```
+
+### FFM Java 21 preview
+
 ```sh
 java --enable-preview --enable-native-access=ALL-UNNAMED -jar mi-app.jar
 ```
@@ -257,28 +330,89 @@ java --enable-preview --enable-native-access=ALL-UNNAMED -jar mi-app.jar
 
 ## GraalVM Native Image
 
-Si compilas tu aplicación como Native Image, añade estos flags al plugin:
+### FFM Java 25
 
 ```xml
 <plugin>
   <groupId>org.graalvm.buildtools</groupId>
   <artifactId>native-maven-plugin</artifactId>
+  <version>0.10.6</version>
   <configuration>
     <buildArgs>
-      <!-- SqliteLibrary carga la .so en el bloque static: diferir a runtime -->
-      <buildArg>--initialize-at-run-time=mx.rafex.sqlite.SqliteLibrary</buildArg>
+      <!-- SqliteLibrary carga la .so en static {}: diferir a runtime -->
+      <buildArg>--initialize-at-run-time=mx.rafex.ether.sqlite.SqliteLibrary</buildArg>
       <buildArg>--enable-native-access=ALL-UNNAMED</buildArg>
-      <!-- Bytecode Java 21 preview: el compilador AOT también necesita el flag -->
-      <buildArg>--enable-preview</buildArg>
     </buildArgs>
   </configuration>
 </plugin>
 ```
 
-En tiempo de ejecución del binario nativo, la librería debe estar instalada o apuntar vía `SNR_LIB`:
+O como binario precompilado del release (`ether-sqlite-ffm-linux-amd64.bin`):
 
 ```sh
-SNR_LIB=/usr/local/lib/libsqlite_native_runtime.so ./mi-binario-nativo
+# Ejecutar directamente
+ETHER_SQLITE_LIB=/usr/local/lib/libether_sqlite_ffm_runtime.so ./ether-sqlite-ffm-linux-amd64.bin
+```
+
+### JNI Java 21
+
+JNI es plenamente compatible con GraalVM native-image sin configuración especial:
+
+```xml
+<plugin>
+  <groupId>org.graalvm.buildtools</groupId>
+  <artifactId>native-maven-plugin</artifactId>
+  <version>0.10.6</version>
+  <!-- Sin buildArgs adicionales para JNI -->
+</plugin>
+```
+
+O como binario precompilado del release (`ether-sqlite-jni-linux-amd64.bin`):
+
+```sh
+ETHER_SQLITE_JNI_LIB=/usr/local/lib/libether_sqlite_jni_runtime.so ./ether-sqlite-jni-linux-amd64.bin
+```
+
+### FFM Java 21 preview — NO compatible con native-image
+
+El bytecode de Java 21 preview (`minor_version=0xFFFF`) no puede compilarse con GraalVM native-image.
+Si necesitas native-image con Java 21, usa el **binding JNI**.
+
+---
+
+## Soporte de plataformas
+
+| OS | Arquitectura | FFM | JNI | Binarios en release |
+|---|---|---|---|---|
+| Linux | x86\_64 | ✅ | ✅ | ✅ |
+| Linux | aarch64 | ✅ | ✅ | ✅ |
+| macOS | arm64 (Apple Silicon) | ✅ compilar fuente | ✅ compilar fuente | ❌ |
+| macOS | x86\_64 | ✅ compilar fuente | ✅ compilar fuente | ❌ |
+
+### Soporte Raspberry Pi
+
+| Modelo | OS | Soporte |
+|---|---|---|
+| Raspberry Pi 3B / 4B | 64-bit (aarch64) | ✅ Soportado |
+| Raspberry Pi 3B / 4B | 32-bit (armhf) | ❌ No soportado |
+
+### Compilar desde fuente (macOS / otras plataformas)
+
+```sh
+git clone https://github.com/rafex/sqlite-native-runtime.git
+cd sqlite-native-runtime
+
+# FFM
+cargo build -p ether-sqlite-ffm --release --manifest-path sources/rust/Cargo.toml
+# Genera: sources/rust/target/release/libether_sqlite_ffm_runtime.dylib
+
+# JNI
+cargo build -p ether-sqlite-jni --release --manifest-path sources/rust/Cargo.toml
+# Genera: sources/rust/target/release/libether_sqlite_jni_runtime.dylib
+
+# Instalar en macOS
+cp sources/rust/target/release/libether_sqlite_ffm_runtime.dylib /usr/local/lib/
+cp sources/rust/target/release/libether_sqlite_jni_runtime.dylib /usr/local/lib/
 ```
 
 ---
@@ -286,7 +420,11 @@ SNR_LIB=/usr/local/lib/libsqlite_native_runtime.so ./mi-binario-nativo
 ## Verificar la instalación
 
 ```sh
-# Comprueba que la librería es válida y exporta los símbolos snr_*
-nm -D /usr/local/lib/libsqlite_native_runtime.so | grep snr_open
+# FFM
+nm -D /usr/local/lib/libether_sqlite_ffm_runtime.so | grep snr_open
 # Debe mostrar: ... T snr_open
+
+# JNI
+nm -D /usr/local/lib/libether_sqlite_jni_runtime.so | grep Java_mx_rafex
+# Debe mostrar: ... T Java_mx_rafex_ether_sqlite_jni_SqliteLibraryJni_snrOpen
 ```
