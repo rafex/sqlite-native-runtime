@@ -1,11 +1,11 @@
 # VERSIONS — Versiones de los artefactos publicados en GitHub Packages (GHCR).
 #
 # Flujo de uso:
-#   1. Haz push del tag de release:   just tag-push
-#      → Flujo 2 (publish.yml) compila todo y publica en GHCR.
-#   2. Edita este archivo con las versiones deseadas para el release.
-#   3. Lanza el release:              just release <tag>
-#      → Flujo 3 (release.yml) descarga de GHCR y crea el GitHub Release.
+#   1. Edita este archivo (versiones + AUTO_RELEASE)
+#   2. Haz push del tag:   just tag-push
+#      → publish.yml compila todo y publica en GHCR.
+#      → Si AUTO_RELEASE=true, dispara release.yml automáticamente al terminar.
+#      → Si AUTO_RELEASE=false, lanza el release cuando quieras: just release <tag>
 #
 # RUST        = tag del que provienen las librerías Rust (.so) en GHCR.
 #               Puede ser un tag v* (publicado por publish.yml) o
@@ -17,8 +17,12 @@
 # JAVA_NATIVE = tag del que provienen los binarios GraalVM native en GHCR.
 #               Normalmente coincide con JAVA_FAT.
 #
-# Formato: KEY=vMAJOR.MINOR.PATCH  (con prefijo 'v', sin espacios ni comillas)
+# AUTO_RELEASE = true  → publish.yml dispara release.yml automáticamente al terminar.
+#                false → el release se lanza manualmente con: just release <tag>
+#
+# Formato: KEY=valor  (sin espacios ni comillas)
 
 RUST=v0.4.0
 JAVA_FAT=v0.4.0
 JAVA_NATIVE=v0.4.0
+AUTO_RELEASE=true
