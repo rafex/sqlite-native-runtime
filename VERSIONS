@@ -19,6 +19,6 @@
 #
 # Formato: KEY=vMAJOR.MINOR.PATCH  (con prefijo 'v', sin espacios ni comillas)
 
-RUST=v0.3.6
-JAVA_FAT=v0.3.6
-JAVA_NATIVE=v0.3.6
+RUST=v0.4.0
+JAVA_FAT=v0.4.0
+JAVA_NATIVE=v0.4.0
