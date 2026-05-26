@@ -63,9 +63,11 @@ on:
 
 # contents: write — crear el GitHub Release y subir assets
 # packages: read  — descargar artefactos desde GHCR
+# actions:  write — disparar verify-release.yml al terminar
 permissions:
   contents: write
   packages: read
+  actions: write
 
 env:
   REGISTRY: ghcr.io
@@ -212,3 +214,14 @@ jobs:
             --title "Release ${{ inputs.release_tag }}" \
             --notes-file "${NOTES_FILE}" \
             artifacts/*
+
+      - name: Disparar verify-release (tests de integración)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh workflow run verify-release.yml \
+            --repo "${{ github.repository }}" \
+            --ref main \
+            --field "release_tag=${{ inputs.release_tag }}"
+          echo "✅ verify-release.yml disparado para ${{ inputs.release_tag }}"
+          echo "   https://github.com/${{ github.repository }}/actions/workflows/verify-release.yml"
