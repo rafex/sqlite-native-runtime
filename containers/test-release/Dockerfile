@@ -99,11 +99,13 @@ RUN set -e; \
     printf ">>> Ejecutando install.sh del release %s...\n" "${VERSION}"; \
     curl -fsSL "${BASE}/install.sh" -o /tmp/install.sh; \
     chmod +x /tmp/install.sh; \
-    ETHER_SQLITE_VERSION="${VERSION}" sh /tmp/install.sh; \
+    # install.sh instala UNA librería por ejecución según ETHER_SQLITE_BINDING. \
+    # El destino es ~/.local/lib/{lib_base}.so (sin sufijo de arquitectura). \
+    ETHER_SQLITE_VERSION="${VERSION}" ETHER_SQLITE_BINDING=ffm sh /tmp/install.sh; \
+    ETHER_SQLITE_VERSION="${VERSION}" ETHER_SQLITE_BINDING=jni sh /tmp/install.sh; \
     \
-    # El install.sh instala ambas .so en /root/.local/lib/ \
-    FFM_LIB="/root/.local/lib/libether_sqlite_ffm_runtime-${ARCH_LABEL}.so"; \
-    JNI_LIB="/root/.local/lib/libether_sqlite_jni_runtime-${ARCH_LABEL}.so"; \
+    FFM_LIB="/root/.local/lib/libether_sqlite_ffm_runtime.so"; \
+    JNI_LIB="/root/.local/lib/libether_sqlite_jni_runtime.so"; \
     [ -f "${FFM_LIB}" ] || { echo "ERROR: install.sh no instaló ${FFM_LIB}"; exit 1; }; \
     [ -f "${JNI_LIB}" ] || { echo "ERROR: install.sh no instaló ${JNI_LIB}"; exit 1; }; \
     cp "${FFM_LIB}" /artifacts/libether_sqlite_ffm_runtime.so; \
