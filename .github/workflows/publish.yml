@@ -1,37 +1,31 @@
 # ─────────────────────────────────────────────────────────────────────────────
-# publish.yml — Flujo 2: Publicación por tag
+# publish.yml — Flujo 2: Compilación y publicación en GitHub Packages
 #
 # Dispara en:
-#   push de tag : v{MAJOR}.{MINOR}.{PATCH}[-sufijo]  (ej. v1.0.0, v1.0.0-rc.1)
+#   push de tag        : v{MAJOR}.{MINOR}.{PATCH}[-sufijo]
+#                        Versiones y AUTO_RELEASE se leen de VERSIONS en el tag.
 #
-# Compila TODO y publica en GitHub Packages (GHCR). No crea GitHub Release.
-# El release final se construye manualmente con: just release <tag>
+#   workflow_dispatch  : ejecución manual desde github.com
+#                        Las versiones se pasan como inputs.
+#                        Actualiza VERSIONS en main y dispara release.yml.
 #
-# Paquetes publicados en GHCR (con prefijo ghcr.io/{owner}/):
+# Paquetes publicados en GHCR (ghcr.io/{owner}/):
 #
-#   Rust .so:
-#     ether-sqlite-ffm:{version}-amd64   → libether_sqlite_ffm_runtime-linux-amd64.so
-#     ether-sqlite-ffm:{version}-arm64   → libether_sqlite_ffm_runtime-linux-arm64.so
-#     ether-sqlite-jni:{version}-amd64   → libether_sqlite_jni_runtime-linux-amd64.so
-#     ether-sqlite-jni:{version}-arm64   → libether_sqlite_jni_runtime-linux-arm64.so
-#
-#   Java fat JARs:
-#     ether-sqlite-ffm-runtime:{version}       → thin + fat JAR (Java 25 stable FFM)
-#     ether-sqlite-ffm-java21-runtime:{version} → thin + fat JAR (Java 21 preview FFM)
-#     ether-sqlite-jni-runtime:{version}       → thin + fat JAR (JNI Java 21)
-#
-#   GraalVM Native Images:
-#     ether-sqlite-ffm-native:{version}-amd64  → ether-sqlite-ffm-linux-amd64.bin
-#     ether-sqlite-ffm-native:{version}-arm64  → ether-sqlite-ffm-linux-arm64.bin
-#     ether-sqlite-jni-native:{version}-amd64  → ether-sqlite-jni-linux-amd64.bin
-#     ether-sqlite-jni-native:{version}-arm64  → ether-sqlite-jni-linux-arm64.bin
+#   ether-sqlite-ffm:{rust_v}-{arch}         → libether_sqlite_ffm_runtime.so
+#   ether-sqlite-jni:{rust_v}-{arch}         → libether_sqlite_jni_runtime.so
+#   ether-sqlite-ffm-runtime:{fat_v}         → thin + fat JAR (Java 25 stable FFM)
+#   ether-sqlite-ffm-java21-runtime:{fat_v}  → thin + fat JAR (Java 21 preview FFM)
+#   ether-sqlite-jni-runtime:{fat_v}         → thin + fat JAR (JNI Java 21)
+#   ether-sqlite-ffm-native:{nat_v}-{arch}   → GraalVM binary (FFM Java 25)
+#   ether-sqlite-jni-native:{nat_v}-{arch}   → GraalVM binary (JNI Java 21)
 #
 # Grafo de jobs:
 #
-#   build-rust-ffm (amd64, arm64)  ──→  build-native-ffm (amd64, arm64)
-#   build-rust-jni (amd64, arm64)  ──→  build-native-jni (amd64, arm64)
-#   build-java-fat    (paralelo)
-#   build-java-fat-ffm21 (paralelo)
+#   update-versions ──→ build-rust-ffm ──→ build-native-ffm
+#                   └──→ build-rust-jni ──→ build-native-jni
+#                   └──→ build-java-fat
+#                   └──→ build-java-fat-ffm21
+#                   └──→ (todos) ──→ trigger-release
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Publish
@@ -41,10 +35,34 @@ on:
     tags:
       - 'v[0-9]*.[0-9]*.[0-9]*'
 
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Tag del release (ej. v0.4.0) — debe existir en el repo'
+        required: true
+        type: string
+      rust_version:
+        description: 'RUST — versión .so FFM+JNI (ej. v0.4.0)'
+        required: true
+        type: string
+      java_fat_version:
+        description: 'JAVA_FAT — versión JARs thin+fat (ej. v0.4.0)'
+        required: true
+        type: string
+      java_native_version:
+        description: 'JAVA_NATIVE — versión binarios GraalVM native (ej. v0.4.0)'
+        required: true
+        type: string
+      auto_release:
+        description: 'Disparar release.yml al terminar'
+        required: false
+        type: boolean
+        default: true
+
 permissions:
   packages: write
-  contents: read
-  actions: write   # necesario para disparar release.yml cuando AUTO_RELEASE=true
+  contents: write  # update-versions hace commit+push a main
+  actions: write   # trigger-release dispara release.yml
 
 env:
   CARGO_TERM_COLOR: always
@@ -52,13 +70,84 @@ env:
   GLIBC_MIN: "2.17"
   REGISTRY: ghcr.io
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # Versión efectiva del release: tag push → github.ref_name, manual → input
+  RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+  # Versiones efectivas de cada grupo de artefactos:
+  # tag push → todos usan el mismo tag; manual → cada uno usa su input
+  EFF_RUST: ${{ inputs.rust_version || inputs.release_tag || github.ref_name }}
+  EFF_FAT:  ${{ inputs.java_fat_version || inputs.release_tag || github.ref_name }}
+  EFF_NAT:  ${{ inputs.java_native_version || inputs.release_tag || github.ref_name }}
 
 jobs:
+
+  # ── Preparación: actualizar VERSIONS si es ejecución manual ──────────────────
+  # Para tag push: solo imprime las versiones leídas de VERSIONS en el tag.
+  # Para manual:   escribe las versiones provistas como inputs en VERSIONS de
+  #                main y hace commit (con [skip ci] para no disparar ci.yml).
+  update-versions:
+    name: "📋 Preparar VERSIONS"
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || env.RELEASE_TAG }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resumen de versiones (tag push — lee de VERSIONS)
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          echo "Disparo por tag: ${{ env.RELEASE_TAG }}"
+          echo ""
+          echo "VERSIONS en el tag:"
+          cat VERSIONS
+
+      - name: Actualizar VERSIONS en main (ejecución manual)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          # Preservar el bloque de comentarios al inicio del archivo.
+          # Reemplazar (o añadir) las cuatro claves.
+          python3 - <<'PYEOF'
+          import re, pathlib
+
+          f = pathlib.Path("VERSIONS")
+          text = f.read_text()
+
+          def set_key(txt, key, val):
+              pattern = rf"^{key}=.*$"
+              replacement = f"{key}={val}"
+              if re.search(pattern, txt, re.MULTILINE):
+                  return re.sub(pattern, replacement, txt, flags=re.MULTILINE)
+              # Clave no existe → añadir al final
+              return txt.rstrip("\n") + f"\n{replacement}\n"
+
+          text = set_key(text, "RUST",         "${{ env.EFF_RUST }}")
+          text = set_key(text, "JAVA_FAT",     "${{ env.EFF_FAT }}")
+          text = set_key(text, "JAVA_NATIVE",  "${{ env.EFF_NAT }}")
+          text = set_key(text, "AUTO_RELEASE", "${{ inputs.auto_release }}")
+
+          f.write_text(text)
+          print("VERSIONS actualizado:")
+          print(text)
+          PYEOF
+
+      - name: Commit y push VERSIONS (ejecución manual)
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add VERSIONS
+          # Si no hay cambios (ya estaba actualizado), el commit falla con exit 1 → ignorar
+          git diff --cached --quiet && echo "VERSIONS sin cambios." || \
+            git commit -m "chore: actualizar VERSIONS para ${{ env.RELEASE_TAG }} [skip ci]"
+          git push origin main
 
   # ── Rust FFM .so (amd64 + arm64) ─────────────────────────────────────────────
   build-rust-ffm:
     name: "🦀 Rust FFM .so (${{ matrix.arch }})"
     runs-on: ${{ matrix.runner }}
+    needs: [update-versions]
     strategy:
       fail-fast: false
       matrix:
@@ -78,6 +167,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Cache Cargo registry
         uses: actions/cache@v4
@@ -123,7 +214,7 @@ jobs:
       - name: Push FFM .so to GHCR
         working-directory: dist
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.EFF_RUST }}"
           VERSION="${VERSION#v}"
           IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-ffm:${VERSION}-${{ matrix.arch }}"
           oras push "$IMAGE" "${{ matrix.lib_dst }}:application/octet-stream"
@@ -140,6 +231,7 @@ jobs:
   build-rust-jni:
     name: "🦀 Rust JNI .so (${{ matrix.arch }})"
     runs-on: ${{ matrix.runner }}
+    needs: [update-versions]
     strategy:
       fail-fast: false
       matrix:
@@ -159,6 +251,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Cache Cargo registry
         uses: actions/cache@v4
@@ -204,7 +298,7 @@ jobs:
       - name: Push JNI .so to GHCR
         working-directory: dist
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.EFF_RUST }}"
           VERSION="${VERSION#v}"
           IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-jni:${VERSION}-${{ matrix.arch }}"
           oras push "$IMAGE" "${{ matrix.lib_dst }}:application/octet-stream"
@@ -218,16 +312,17 @@ jobs:
           retention-days: 1
 
   # ── Java Fat JARs — FFM Java 25 + JNI Java 21 ────────────────────────────────
-  # GraalVM 25 compila ambos módulos (JNI usa --release 21 en su pom.xml).
-  # No necesita la .so: tests deshabilitados (-DskipTests).
   build-java-fat:
     name: "☕ Java Fat JARs (FFM25 + JNI)"
     runs-on: ubuntu-latest
+    needs: [update-versions]
     env:
       MAVEN_REPO: ${{ github.workspace }}/.m2-local
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup GraalVM JDK 25
         uses: graalvm/setup-graalvm@v1
@@ -245,7 +340,7 @@ jobs:
 
       - name: Set release version en pom.xml (runtime modules solamente)
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.EFF_FAT }}"
           VERSION="${VERSION#v}"
           # ether-sqlite-core NO se versiona: es dependencia interna no publicada.
           ./mvnw versions:set -f sources/java/ether-sqlite-ffm-runtime/pom.xml \
@@ -267,7 +362,7 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p dist
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.EFF_FAT }}"
           VERSION="${VERSION#v}"
           cp "sources/java/ether-sqlite-ffm-runtime/target/ether-sqlite-ffm-runtime-${VERSION}.jar" \
              "dist/ether-sqlite-ffm-runtime-${VERSION}.jar"
@@ -287,7 +382,7 @@ jobs:
       - name: Push ether-sqlite-ffm-runtime JARs a GHCR
         working-directory: dist
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.EFF_FAT }}"
           VERSION="${VERSION#v}"
           IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-ffm-runtime:${VERSION}"
           oras push "${IMAGE}" \
@@ -298,7 +393,7 @@ jobs:
       - name: Push ether-sqlite-jni-runtime JARs a GHCR
         working-directory: dist
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.EFF_FAT }}"
           VERSION="${VERSION#v}"
           IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-jni-runtime:${VERSION}"
           oras push "${IMAGE}" \
@@ -313,16 +408,17 @@ jobs:
           retention-days: 7
 
   # ── Java Fat JARs — FFM Java 21 preview ──────────────────────────────────────
-  # Requiere JDK 21 por --enable-preview (bytecode 65.65535).
-  # NO genera native-image (preview bytecode bloquea GraalVM).
   build-java-fat-ffm21:
     name: "☕ Java Fat JARs (FFM21 preview)"
     runs-on: ubuntu-latest
+    needs: [update-versions]
     env:
       MAVEN_REPO: ${{ github.workspace }}/.m2-local
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Setup GraalVM JDK 21
         uses: graalvm/setup-graalvm@v1
@@ -340,7 +436,7 @@ jobs:
 
       - name: Set release version en pom.xml
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.EFF_FAT }}"
           VERSION="${VERSION#v}"
           ./mvnw versions:set -f sources/java/ether-sqlite-ffm-java21-runtime/pom.xml \
             -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
@@ -355,7 +451,7 @@ jobs:
       - name: Collect artifacts
         run: |
           mkdir -p dist
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.EFF_FAT }}"
           VERSION="${VERSION#v}"
           cp "sources/java/ether-sqlite-ffm-java21-runtime/target/ether-sqlite-ffm-java21-runtime-${VERSION}.jar" \
              "dist/ether-sqlite-ffm-java21-runtime-${VERSION}.jar"
@@ -371,7 +467,7 @@ jobs:
       - name: Push ether-sqlite-ffm-java21-runtime JARs a GHCR
         working-directory: dist
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.EFF_FAT }}"
           VERSION="${VERSION#v}"
           IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-ffm-java21-runtime:${VERSION}"
           oras push "${IMAGE}" \
@@ -407,6 +503,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Download FFM .so (del mismo run)
         uses: actions/download-artifact@v4
@@ -431,7 +529,7 @@ jobs:
 
       - name: Set release version en pom.xml
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.EFF_NAT }}"
           VERSION="${VERSION#v}"
           ./mvnw versions:set -f sources/java/ether-sqlite-ffm-runtime/pom.xml \
             -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
@@ -460,7 +558,7 @@ jobs:
       - name: Push native binary FFM a GHCR
         working-directory: out
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.EFF_NAT }}"
           VERSION="${VERSION#v}"
           IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-ffm-native:${VERSION}-${{ matrix.arch }}"
           oras push "${IMAGE}" "${{ matrix.binary }}:application/octet-stream"
@@ -494,6 +592,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RELEASE_TAG }}
 
       - name: Download JNI .so (del mismo run)
         uses: actions/download-artifact@v4
@@ -518,7 +618,7 @@ jobs:
 
       - name: Set release version en pom.xml
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.EFF_NAT }}"
           VERSION="${VERSION#v}"
           ./mvnw versions:set -f sources/java/ether-sqlite-jni-runtime/pom.xml \
             -DnewVersion="${VERSION}" -DgenerateBackupPoms=false --no-transfer-progress -q
@@ -547,7 +647,7 @@ jobs:
       - name: Push native binary JNI a GHCR
         working-directory: out
         run: |
-          VERSION="${{ github.ref_name }}"
+          VERSION="${{ env.EFF_NAT }}"
           VERSION="${VERSION#v}"
           IMAGE="${{ env.REGISTRY }}/${{ github.repository_owner }}/ether-sqlite-jni-native:${VERSION}-${{ matrix.arch }}"
           oras push "${IMAGE}" "${{ matrix.binary }}:application/octet-stream"
@@ -559,11 +659,12 @@ jobs:
           path: out/
           retention-days: 7
 
-  # ── Disparar release.yml si AUTO_RELEASE=true en VERSIONS ────────────────────
+  # ── Disparar release.yml cuando corresponda ───────────────────────────────────
   # Corre después de que TODOS los builds y publicaciones en GHCR terminaron.
-  # Usa GITHUB_TOKEN (ya tiene actions:write) — no requiere gh auth local.
+  # Determina si AUTO_RELEASE está activo (input manual o VERSIONS del tag).
+  # Pasa las versiones explícitamente a release.yml para evitar leer VERSIONS del tag.
   trigger-release:
-    name: "🚀 Trigger release.yml (AUTO_RELEASE)"
+    name: "🚀 Trigger release.yml"
     runs-on: ubuntu-latest
     needs:
       - build-rust-ffm
@@ -576,12 +677,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
+          ref: ${{ env.RELEASE_TAG }}
 
-      - name: Leer AUTO_RELEASE de VERSIONS
+      - name: Determinar AUTO_RELEASE
         id: check
         run: |
-          AUTO="$(grep '^AUTO_RELEASE=' VERSIONS | cut -d= -f2 | tr -d '[:space:]' || echo 'false')"
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            AUTO="${{ inputs.auto_release }}"
+          else
+            AUTO="$(grep '^AUTO_RELEASE=' VERSIONS | cut -d= -f2 | tr -d '[:space:]' || echo 'false')"
+          fi
           echo "auto_release=${AUTO}" >> $GITHUB_OUTPUT
           echo "AUTO_RELEASE=${AUTO}"
 
@@ -593,13 +698,16 @@ jobs:
           gh workflow run release.yml \
             --repo "${{ github.repository }}" \
             --ref main \
-            --field "release_tag=${{ github.ref_name }}"
-          echo "✅ release.yml disparado para ${{ github.ref_name }}"
+            --field "release_tag=${{ env.RELEASE_TAG }}" \
+            --field "rust_version=${{ env.EFF_RUST }}" \
+            --field "java_fat_version=${{ env.EFF_FAT }}" \
+            --field "java_native_version=${{ env.EFF_NAT }}"
+          echo "✅ release.yml disparado para ${{ env.RELEASE_TAG }}"
           echo "   https://github.com/${{ github.repository }}/actions/workflows/release.yml"
 
-      - name: Saltar (AUTO_RELEASE=false)
+      - name: Saltar (AUTO_RELEASE deshabilitado)
         if: steps.check.outputs.auto_release != 'true'
         run: |
-          echo "AUTO_RELEASE no está habilitado en VERSIONS."
+          echo "AUTO_RELEASE no está habilitado."
           echo "Para lanzar el release manualmente ejecuta:"
-          echo "  just release ${{ github.ref_name }}"
+          echo "  just release ${{ env.RELEASE_TAG }}"

@@ -45,6 +45,21 @@ on:
         description: 'Tag del release final (ej. v1.0.0)'
         required: true
         type: string
+      rust_version:
+        description: 'RUST — versión .so en GHCR (ej. v1.0.0). Vacío = leer de VERSIONS'
+        required: false
+        type: string
+        default: ''
+      java_fat_version:
+        description: 'JAVA_FAT — versión JARs en GHCR (ej. v1.0.0). Vacío = leer de VERSIONS'
+        required: false
+        type: string
+        default: ''
+      java_native_version:
+        description: 'JAVA_NATIVE — versión binarios native en GHCR (ej. v1.0.0). Vacío = leer de VERSIONS'
+        required: false
+        type: string
+        default: ''
 
 # contents: write — crear el GitHub Release y subir assets
 # packages: read  — descargar artefactos desde GHCR
@@ -67,22 +82,31 @@ jobs:
         with:
           ref: ${{ inputs.release_tag }}
 
-      - name: Leer VERSIONS desde el tag
+      - name: Determinar versiones (inputs o VERSIONS del tag)
         id: versions
         run: |
-          VERSIONS_FILE="${GITHUB_WORKSPACE}/VERSIONS"
-          if [[ ! -f "$VERSIONS_FILE" ]]; then
-            echo "ERROR: archivo VERSIONS no encontrado en el tag ${{ inputs.release_tag }}" >&2
-            exit 1
-          fi
-
-          RUST="$(grep '^RUST=' "$VERSIONS_FILE" | cut -d= -f2 | tr -d '[:space:]')"
-          JAVA_FAT="$(grep '^JAVA_FAT=' "$VERSIONS_FILE" | cut -d= -f2 | tr -d '[:space:]')"
-          JAVA_NATIVE="$(grep '^JAVA_NATIVE=' "$VERSIONS_FILE" | cut -d= -f2 | tr -d '[:space:]')"
+          # Si se pasan inputs explícitos (invocado por publish.yml o manualmente),
+          # se usan directamente. Si están vacíos, se leen de VERSIONS en el tag.
+          RUST="${{ inputs.rust_version }}"
+          JAVA_FAT="${{ inputs.java_fat_version }}"
+          JAVA_NATIVE="${{ inputs.java_native_version }}"
 
           if [[ -z "$RUST" || -z "$JAVA_FAT" || -z "$JAVA_NATIVE" ]]; then
-            echo "ERROR: VERSIONS incompleto — se requieren RUST, JAVA_FAT y JAVA_NATIVE" >&2
-            cat "$VERSIONS_FILE" >&2
+            VERSIONS_FILE="${GITHUB_WORKSPACE}/VERSIONS"
+            if [[ ! -f "$VERSIONS_FILE" ]]; then
+              echo "ERROR: versiones no pasadas como inputs y VERSIONS no encontrado en el tag." >&2
+              exit 1
+            fi
+            RUST="${RUST:-$(grep '^RUST=' "$VERSIONS_FILE" | cut -d= -f2 | tr -d '[:space:]')}"
+            JAVA_FAT="${JAVA_FAT:-$(grep '^JAVA_FAT=' "$VERSIONS_FILE" | cut -d= -f2 | tr -d '[:space:]')}"
+            JAVA_NATIVE="${JAVA_NATIVE:-$(grep '^JAVA_NATIVE=' "$VERSIONS_FILE" | cut -d= -f2 | tr -d '[:space:]')}"
+            echo "Fuente: VERSIONS del tag ${{ inputs.release_tag }}"
+          else
+            echo "Fuente: inputs del workflow"
+          fi
+
+          if [[ -z "$RUST" || -z "$JAVA_FAT" || -z "$JAVA_NATIVE" ]]; then
+            echo "ERROR: versiones incompletas — se requieren RUST, JAVA_FAT y JAVA_NATIVE" >&2
             exit 1
           fi
 
@@ -96,7 +120,7 @@ jobs:
           echo "nat_v=${NAT_V}"        >> $GITHUB_OUTPUT
 
           echo ""
-          echo "VERSIONS leído desde tag ${{ inputs.release_tag }}:"
+          echo "Versiones para el release ${{ inputs.release_tag }}:"
           echo "  RUST        = ${RUST}  (GHCR: ${RUST_V})"
           echo "  JAVA_FAT    = ${JAVA_FAT}  (GHCR: ${FAT_V})"
           echo "  JAVA_NATIVE = ${JAVA_NATIVE}  (GHCR: ${NAT_V})"
