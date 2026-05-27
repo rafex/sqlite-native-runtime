@@ -1,0 +1,32 @@
+[package]
+name        = "ether-worker"
+version     = "0.1.0"
+edition     = "2021"
+description = "Worker MQTT -> SQLite para el ecosistema ether-sqlite"
+
+[[bin]]
+name = "ether-worker"
+path = "src/main.rs"
+
+[dependencies]
+# SQLite core — bundled SQLite, ABI C reutilizable
+ether-sqlite-core = { path = "../ether-sqlite-core" }
+
+# MQTT async client
+rumqttc = "0.24"
+
+# Async runtime (solo rt-multi-thread + macros + signal + sync + time)
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+
+# Serialización
+serde      = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# UUID v4 para IDs generados cuando el payload no incluye "id"
+uuid = { version = "1", features = ["v4"] }
+
+# Timestamps ISO 8601
+chrono = { version = "0.4", default-features = false, features = ["std", "clock"] }
+
+[dev-dependencies]
+tempfile = "3"

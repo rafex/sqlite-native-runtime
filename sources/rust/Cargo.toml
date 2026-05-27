@@ -1,5 +1,5 @@
 [workspace]
-members  = ["ether-sqlite-core", "ether-sqlite-ffm", "ether-sqlite-jni"]
+members  = ["ether-sqlite-core", "ether-sqlite-ffm", "ether-sqlite-jni", "ether-worker"]
 resolver = "2"
 
 [profile.release]
