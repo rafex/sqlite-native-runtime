@@ -195,33 +195,75 @@ sources/java/ether-sqlite-mqtt-worker/
 </dependencies>
 ```
 
-#### 1C — Esquema SQLite mínimo
+#### 1C — Esquema SQLite — tabla genérica de ingesta
+
+> Ver diseño completo en [WORKER_IDEA.md — Diseño del protocolo MQTT](WORKER_IDEA.md).
+>
+> Decisión de diseño: **tabla genérica `ingest_event`** en lugar de mapeo dinámico
+> JSON → tabla específica. El worker nunca genera SQL dinámico → cero riesgo de injection.
+> Las tablas de dominio se alimentan por ETL/vistas downstream.
 
 ```sql
--- Tabla de ingesta genérica (configurable por topic → tabla)
-CREATE TABLE IF NOT EXISTS mqtt_messages (
-    id        INTEGER PRIMARY KEY,
-    topic     TEXT    NOT NULL,
-    payload   TEXT,           -- JSON o raw text
-    received  INTEGER NOT NULL -- epoch ms
+CREATE TABLE IF NOT EXISTS ingest_event (
+    id            TEXT    PRIMARY KEY,           -- msg id del payload
+    tenant        TEXT    NOT NULL,
+    database_name TEXT    NOT NULL,
+    entity        TEXT    NOT NULL,
+    operation     TEXT    NOT NULL,              -- insert | insert_batch | upsert | update | delete
+    topic         TEXT    NOT NULL,              -- topic MQTT completo (auditoría)
+    priority      TEXT    NOT NULL DEFAULT 'normal',
+    schema_name   TEXT,                          -- "sensor_reading.v1"
+    payload       TEXT    NOT NULL,              -- JSON raw completo
+    metadata      TEXT,                          -- JSON del campo "metadata"
+    received_at   TEXT    NOT NULL,              -- ISO 8601
+    processed_at  TEXT                           -- NULL hasta ETL downstream
 );
-CREATE INDEX IF NOT EXISTS idx_mqtt_topic ON mqtt_messages(topic);
-CREATE INDEX IF NOT EXISTS idx_mqtt_received ON mqtt_messages(received);
+
+CREATE INDEX IF NOT EXISTS idx_ingest_tenant   ON ingest_event(tenant, database_name, entity);
+CREATE INDEX IF NOT EXISTS idx_ingest_received ON ingest_event(received_at);
+CREATE INDEX IF NOT EXISTS idx_ingest_priority ON ingest_event(priority, received_at);
+CREATE INDEX IF NOT EXISTS idx_ingest_pending  ON ingest_event(processed_at)
+    WHERE processed_at IS NULL;
 ```
 
-#### 1D — Configuración por variables de entorno
+#### 1D — Patrón de topics soportados
+
+```
+db/{priority}/{tenant}/{database}/{entity}/{operation}
+
+Suscripción del worker:
+  MQTT_TOPICS=db/+/+/+/+/insert,db/+/+/+/+/insert_batch,db/+/+/+/+/upsert
+
+Topics de control (el worker publica):
+  worker/{worker_id}/health
+  worker/{worker_id}/metrics
+  db/dlq/{tenant}/{database}/{entity}/{operation}
+```
+
+El topic router en el worker extrae los 6 segmentos y popula los campos de `ingest_event`.
+
+#### 1E — Configuración por variables de entorno
 
 | Variable | Default | Descripción |
 |---|---|---|
 | `MQTT_BROKER` | `tcp://localhost:1883` | URL del broker |
 | `MQTT_CLIENT_ID` | `snr-worker-{hostname}` | Client ID MQTT |
-| `MQTT_TOPICS` | `#` | Topics separados por coma (acepta wildcards) |
+| `MQTT_TOPICS` | `db/+/+/+/+/insert,db/+/+/+/+/insert_batch` | Topics separados por coma |
 | `MQTT_QOS` | `1` | QoS: 0, 1 o 2 |
 | `MQTT_USERNAME` | *(vacío)* | Usuario MQTT |
 | `MQTT_PASSWORD` | *(vacío)* | Contraseña MQTT |
-| `SQLITE_DB` | `/var/lib/snr/mqtt.db` | Ruta del archivo SQLite |
-| `BATCH_SIZE` | `500` | Máximo mensajes por transacción |
-| `FLUSH_MS` | `200` | Máximo ms de espera antes de hacer flush |
+| `WORKER_ID` | `ether-sqlite-{hostname}` | ID del worker (aparece en topics de control) |
+| `SQLITE_DB` | `/var/lib/snr/ingest.db` | Ruta del archivo SQLite |
+| `BATCH_SIZE_HIGH` | `100` | Batch máximo para prioridad `high` |
+| `BATCH_SIZE_NORMAL` | `500` | Batch máximo para prioridad `normal` |
+| `BATCH_SIZE_LOW` | `2000` | Batch máximo para prioridad `low` |
+| `FLUSH_MS_HIGH` | `50` | Flush timeout para prioridad `high` |
+| `FLUSH_MS_NORMAL` | `200` | Flush timeout para prioridad `normal` |
+| `FLUSH_MS_LOW` | `1000` | Flush timeout para prioridad `low` |
+| `DLQ_ENABLED` | `true` | Publicar mensajes fallidos en DLQ topic |
+| `DLQ_MAX_RETRIES` | `3` | Reintentos antes de enviar a DLQ |
+| `HEALTH_INTERVAL_MS` | `30000` | Cada cuánto publicar en `worker/{id}/health` |
+| `METRICS_INTERVAL_MS` | `10000` | Cada cuánto publicar en `worker/{id}/metrics` |
 | `ETHER_SQLITE_JNI_LIB` | *(auto-detectado)* | Ruta a libether_sqlite_jni_runtime.so |
 
 ### Camino Rust (Opción C)

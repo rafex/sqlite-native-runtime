@@ -1,0 +1,14 @@
+[worker] config = Config { broker_host: "localhost", broker_port: 1883, client_id: "snr-spike-rust-80985", topics: ["benchmark/#"], qos: 1, sqlite_db: "/private/tmp/snr-spike-spike-c-rust.db", batch_size: 500, flush_ms: 200 }
+[worker] MQTT connected — startup=1ms topics=["benchmark/#"]
+[worker] reconnected to broker
+[inserter] committed=58 batches=20 tps=1/s commit=0ms
+[inserter] committed=155 batches=40 tps=2/s commit=0ms
+[inserter] committed=269 batches=60 tps=3/s commit=0ms
+[inserter] committed=399 batches=80 tps=5/s commit=0ms
+[inserter] committed=526 batches=100 tps=7/s commit=0ms
+[inserter] committed=614 batches=120 tps=8/s commit=0ms
+[inserter] committed=689 batches=140 tps=9/s commit=0ms
+[inserter] committed=766 batches=160 tps=10/s commit=0ms
+[inserter] committed=848 batches=180 tps=11/s commit=0ms
+[inserter] committed=892 batches=200 tps=12/s commit=0ms
+./bench/run-benchmark.sh: line 117: 80985 Terminated: 15          '/Users/rafex/repository/github/rafex/sqlite-native-runtime/sources/spike/worker-rust/target/release/snr-mqtt-worker'
